@@ -160,6 +160,7 @@ def main() -> None:
         from src.particles.particle_system import ParticleSystem
         from src.effects.vfx_manager import VfxManager
         from src.ui.control_panel import UIState, ControlPanel
+        import dearpygui.dearpygui as dpg
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -243,216 +244,226 @@ def main() -> None:
         # Initialize UI Control Panel (Module 9)
         ui_state = UIState()
         ui_panel = ControlPanel(ui_state)
-        ui_panel.setup()
+        
+        # Start Dear PyGui in a separate thread to prevent message loop deadlocks (Module 10)
+        import threading
+        def run_dpg_thread():
+            ui_panel.setup()
+            while dpg.is_dearpygui_running():
+                ui_panel.update()
+                time.sleep(0.016)
+            ui_panel.release()
+            
+        ui_thread = threading.Thread(target=run_dpg_thread, name="DPG_UI_Thread", daemon=True)
+        ui_thread.start()
         
         logger.info("Starting ModernGL VFX loop. Press 'ESC' or close the viewport to exit.")
         try:
-            while not window.is_closing and dpg.is_dearpygui_running():
+            while not window.is_closing and ui_thread.is_alive():
+                # Update physics simulator frame time (Modules 7 & 8)
+                current_time = time.time()
+                dt = current_time - last_time
+                last_time = current_time
+                dt = min(max(dt, 0.001), 0.1) # Clamp dt bounds
+                
                 ret, frame = cam.read()
                 if ret and frame is not None:
-                    # Update physics simulator frame time (Modules 7 & 8)
-                    current_time = time.time()
-                    dt = current_time - last_time
-                    last_time = current_time
-                    dt = min(max(dt, 0.001), 0.1) # Clamp dt bounds
-                    
-                    # Reset telemetry stats for UI updates (Module 9)
-                    ui_state.left_gesture = "None"
-                    ui_state.right_gesture = "None"
-                    ui_state.left_palm_pos = (0.0, 0.0, 0.0)
-                    ui_state.right_palm_pos = (0.0, 0.0, 0.0)
-
                     # Update webcam background texture (MediaPipe/OpenGL wants RGB)
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     renderer.update_background_texture(frame_rgb)
                     
-                    # Bind HDR FBO and clear with camera quad background
-                    renderer.prepare_scene()
-                    
-                    # Synchronize active model selection with UI State (Module 9)
-                    active_model_idx = ui_state.active_model_idx
-                    
-                    # Synchronize smoothing status (Module 9)
-                    tracker.smoothing_enabled = ui_state.smoothing_enabled
-                    
                     # Track hands
                     hands = tracker.process_frame(frame, cam.camera_matrix)
+                else:
+                    hands = []
+
+                # Bind HDR FBO and clear with camera quad background
+                renderer.prepare_scene()
+                
+                # Reset telemetry stats for UI updates (Module 9)
+                ui_state.left_gesture = "None"
+                ui_state.right_gesture = "None"
+                ui_state.left_palm_pos = (0.0, 0.0, 0.0)
+                ui_state.right_palm_pos = (0.0, 0.0, 0.0)
+
+                # Synchronize active model selection with UI State (Module 9)
+                active_model_idx = ui_state.active_model_idx
+                
+                # Synchronize smoothing status (Module 9)
+                tracker.smoothing_enabled = ui_state.smoothing_enabled
+                
+                # Compute Projection Matrix from Camera Intrinsics
+                fx = cam.camera_matrix[0, 0]
+                fy = cam.camera_matrix[1, 1]
+                cx = cam.camera_matrix[0, 2]
+                cy = cam.camera_matrix[1, 2]
+                w, h = cam.width, cam.height
+                near, far = 0.05, 20.0
+                
+                proj = glm.mat4(0.0)
+                proj[0][0] = 2.0 * fx / w
+                proj[1][1] = 2.0 * fy / h
+                proj[2][0] = (w - 2.0 * cx) / w
+                proj[2][1] = (2.0 * cy - h) / h
+                proj[2][2] = -(far + near) / (far - near)
+                proj[2][3] = -1.0
+                proj[3][2] = -(2.0 * far * near) / (far - near)
+                
+                view = glm.mat4(1.0) # Identity View Matrix
+                
+                # Render 3D components for active hands
+                for hand in hands:
+                    gesture = gesture_detector.update(hand)
+                    label = hand.label
                     
-                    # Compute Projection Matrix from Camera Intrinsics
-                    fx = cam.camera_matrix[0, 0]
-                    fy = cam.camera_matrix[1, 1]
-                    cx = cam.camera_matrix[0, 2]
-                    cy = cam.camera_matrix[1, 2]
-                    w, h = cam.width, cam.height
-                    near, far = 0.05, 20.0
+                    # Edge-triggered swiping to cycle models (updates DPG selector dynamically)
+                    if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
+                        active_model_idx = (active_model_idx - 1) % 3
+                        ui_state.active_model_idx = active_model_idx
+                        ui_panel.set_active_model_combo(active_model_idx)
+                        logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
+                    elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
+                        active_model_idx = (active_model_idx + 1) % 3
+                        ui_state.active_model_idx = active_model_idx
+                        ui_panel.set_active_model_combo(active_model_idx)
+                        logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
+                        
+                    # Save current gesture state
+                    last_gestures[label] = gesture
                     
-                    proj = glm.mat4(0.0)
-                    proj[0][0] = 2.0 * fx / w
-                    proj[1][1] = 2.0 * fy / h
-                    proj[2][0] = (w - 2.0 * cx) / w
-                    proj[2][1] = (2.0 * cy - h) / h
-                    proj[2][2] = -(far + near) / (far - near)
-                    proj[2][3] = -1.0
-                    proj[3][2] = -(2.0 * far * near) / (far - near)
+                    # Extract active model parameters
+                    active_model_path = models_list[active_model_idx]
+                    active_model_name = model_names[active_model_idx]
                     
-                    view = glm.mat4(1.0) # Identity View Matrix
+                    # Update VFX Manager transitions, trails, and swarms (Module 8)
+                    vfx_manager.update(dt, hand, active_model_name, gesture)
                     
-                    # Render 3D components for active hands
-                    for hand in hands:
-                        gesture = gesture_detector.update(hand)
-                        label = hand.label
+                    # If scale is near zero, the overlay is hidden
+                    if vfx_manager.transition_scale <= 0.01:
+                        continue
                         
-                        # Edge-triggered swiping to cycle models (updates DPG selector dynamically)
-                        if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
-                            active_model_idx = (active_model_idx - 1) % 3
-                            ui_state.active_model_idx = active_model_idx
-                            ui_panel.set_active_model_combo(active_model_idx)
-                            logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
-                        elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
-                            active_model_idx = (active_model_idx + 1) % 3
-                            ui_state.active_model_idx = active_model_idx
-                            ui_panel.set_active_model_combo(active_model_idx)
-                            logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
-                            
-                        # Save current gesture state
-                        last_gestures[label] = gesture
-                        
-                        # Extract active model parameters
-                        active_model_path = models_list[active_model_idx]
-                        active_model_name = model_names[active_model_idx]
-                        
-                        # Update VFX Manager transitions, trails, and swarms (Module 8)
-                        vfx_manager.update(dt, hand, active_model_name, gesture)
-                        
-                        # If scale is near zero, the overlay is hidden
-                        if vfx_manager.transition_scale <= 0.01:
-                            continue
-                            
-                        # Extract 3D position (One Euro filtered in HandTracker)
-                        pos = glm.vec3(hand.palm_center[0], hand.palm_center[1], hand.palm_center[2])
-                        
-                        # Extract Orientation Rotation Matrix
-                        rot = glm.mat4(1.0)
-                        for col in range(3):
-                            for row in range(3):
-                                rot[col][row] = hand.rotation_matrix[col][row]
-                        
-                        # Update telemetry positions for UI (Module 9)
-                        if label == "Left":
-                            ui_state.left_gesture = gesture.value.upper()
-                            ui_state.left_palm_pos = (pos.x, pos.y, pos.z)
-                        else:
-                            ui_state.right_gesture = gesture.value.upper()
-                            ui_state.right_palm_pos = (pos.x, pos.y, pos.z)
-                            
-                        # Scale factor of hand, smoothly animated by transition scale
-                        scale = hand.scale * 0.4 * vfx_manager.transition_scale
-                        
-                        # Sync wing fluttering settings from UI panel (Module 9)
-                        animate_wings = ui_state.animate_wings and (active_model_name == "butterfly")
-                        
-                        # Model Base Colors and Emissive profiles
-                        if active_model_name == "orchid":
-                            obj_color = glm.vec3(0.95, 0.45, 0.65)   # Pink/violet orchid
-                            base_emissive = glm.vec3(0.25, 0.08, 0.18)
-                        elif active_model_name == "wing":
-                            obj_color = glm.vec3(1.0, 0.25, 0.1)     # Crimson flame wing
-                            base_emissive = glm.vec3(0.35, 0.08, 0.0)
-                        else:  # butterfly
-                            obj_color = glm.vec3(0.1, 0.65, 1.0)     # Neon blue butterfly
-                            base_emissive = glm.vec3(0.0, 0.2, 0.45)
-                        
-                        # Map gestures to colors and glow emissive intensities
-                        if gesture == Gesture.CLOSED_FIST:
-                            # Fist hides the 3D model (goes to sleeping state)
-                            continue
-                        elif gesture == Gesture.PINCH:
-                            # Pinch yields hot red glow boost
-                            emissive = base_emissive * 6.0 + glm.vec3(1.5, 0.0, 0.0)
-                            box_color = glm.vec3(1.0, 0.1, 0.1)
-                        elif gesture == Gesture.PEACE:
-                            # Peace yields electric blue glow boost
-                            emissive = base_emissive * 6.0 + glm.vec3(0.0, 0.0, 1.5)
-                            box_color = glm.vec3(0.1, 0.1, 1.0)
-                        elif gesture == Gesture.POINTING:
-                            # Pointing yields green glow boost
-                            emissive = base_emissive * 6.0 + glm.vec3(0.0, 1.5, 0.0)
-                            box_color = glm.vec3(0.1, 1.0, 0.1)
-                        else:
-                            # Default palm open uses base glow
-                            emissive = base_emissive
-                            box_color = obj_color
-                            
-                        # Render wireframe bounding box
-                        renderer.render_bounding_box(pos, rot, scale, proj, view, box_color)
-                        
-                        # Render 3D Model with lighting and animation time parameter
-                        renderer.render_model(
-                            active_model_path,
-                            pos,
-                            rot,
-                            scale,
-                            proj,
-                            view,
-                            emissive_color=emissive,
-                            object_color=obj_color,
-                            animate_wings=animate_wings,
-                            time_val=time.time() - start_time
-                        )
-                        
-                        # Render secondary butterfly swarm members if applicable (Module 8)
-                        if active_model_name == "butterfly":
-                            vfx_manager.render_swarm(
-                                renderer, proj, view, pos, rot, scale, time.time() - start_time
-                            )
-                        
-                        # Interactive particle emissions based on active gestures (Module 7)
-                        if gesture == Gesture.PINCH:
-                            # Dense hot energy sparks at pinch center
-                            pinch_pos = (hand.landmarks_3d[4] + hand.landmarks_3d[8]) * 0.5
-                            particles.spawn(pinch_pos, emitter_type="energy", count=3, base_color=(1.0, 0.2, 0.2))
-                        elif gesture == Gesture.POINTING:
-                            # Fire sparks from index tip
-                            tip_pos = hand.landmarks_3d[8]
-                            particles.spawn(tip_pos, emitter_type="fire", count=2, base_color=(0.2, 1.0, 0.2))
-                        elif gesture == Gesture.PEACE:
-                            # Magic trails from index & middle tips
-                            idx_pos = hand.landmarks_3d[8]
-                            mid_pos = hand.landmarks_3d[12]
-                            particles.spawn(idx_pos, emitter_type="magic", count=1, base_color=(0.3, 0.2, 1.0))
-                            particles.spawn(mid_pos, emitter_type="magic", count=1, base_color=(0.9, 0.2, 1.0))
-                        elif gesture == Gesture.OPEN_PALM:
-                            # Ambient sparkles at palm center
-                            palm_pos = hand.palm_center
-                            particles.spawn(palm_pos, emitter_type="sparkles", count=1, base_color=(1.0, 1.0, 0.9))
-                            
-                    # Update particles simulation (Module 7)
-                    particles.update(dt)
+                    # Extract 3D position (One Euro filtered in HandTracker)
+                    pos = glm.vec3(hand.palm_center[0], hand.palm_center[1], hand.palm_center[2])
                     
-                    # Render all active particles on top of the models in HDR space (Module 7)
-                    particles.render(proj, view)
+                    # Extract Orientation Rotation Matrix
+                    rot = glm.mat4(1.0)
+                    for col in range(3):
+                        for row in range(3):
+                            rot[col][row] = hand.rotation_matrix[col][row]
+                    
+                    # Update telemetry positions for UI (Module 9)
+                    if label == "Left":
+                        ui_state.left_gesture = gesture.value.upper()
+                        ui_state.left_palm_pos = (pos.x, pos.y, pos.z)
+                    else:
+                        ui_state.right_gesture = gesture.value.upper()
+                        ui_state.right_palm_pos = (pos.x, pos.y, pos.z)
                         
-                    # Perform bloom post-processing, exposure tone-mapping, and composite to screen (Module 9 bindings)
-                    renderer.resolve_post_processing(
-                        exposure=ui_state.exposure,
-                        bloom_intensity=ui_state.bloom_intensity,
-                        gamma=ui_state.gamma
+                    # Scale factor of hand, smoothly animated by transition scale
+                    scale = hand.scale * 0.4 * vfx_manager.transition_scale
+                    
+                    # Sync wing fluttering settings from UI panel (Module 9)
+                    animate_wings = ui_state.animate_wings and (active_model_name == "butterfly")
+                    
+                    # Model Base Colors and Emissive profiles
+                    if active_model_name == "orchid":
+                        obj_color = glm.vec3(0.95, 0.45, 0.65)   # Pink/violet orchid
+                        base_emissive = glm.vec3(0.25, 0.08, 0.18)
+                    elif active_model_name == "wing":
+                        obj_color = glm.vec3(1.0, 0.25, 0.1)     # Crimson flame wing
+                        base_emissive = glm.vec3(0.35, 0.08, 0.0)
+                    else:  # butterfly
+                        obj_color = glm.vec3(0.1, 0.65, 1.0)     # Neon blue butterfly
+                        base_emissive = glm.vec3(0.0, 0.2, 0.45)
+                    
+                    # Map gestures to colors and glow emissive intensities
+                    if gesture == Gesture.PINCH:
+                        # Pinch yields hot red glow boost
+                        emissive = base_emissive * 6.0 + glm.vec3(1.5, 0.0, 0.0)
+                        box_color = glm.vec3(1.0, 0.1, 0.1)
+                    elif gesture == Gesture.PEACE:
+                        # Peace yields electric blue glow boost
+                        emissive = base_emissive * 6.0 + glm.vec3(0.0, 0.0, 1.5)
+                        box_color = glm.vec3(0.1, 0.1, 1.0)
+                    elif gesture == Gesture.POINTING:
+                        # Pointing yields green glow boost
+                        emissive = base_emissive * 6.0 + glm.vec3(0.0, 1.5, 0.0)
+                        box_color = glm.vec3(0.1, 1.0, 0.1)
+                    else:
+                        # Default palm open uses base glow
+                        emissive = base_emissive
+                        box_color = obj_color
+                        
+                    # Render wireframe bounding box
+                    renderer.render_bounding_box(pos, rot, scale, proj, view, box_color)
+                    
+                    # Render 3D Model with lighting and animation time parameter
+                    renderer.render_model(
+                        active_model_path,
+                        pos,
+                        rot,
+                        scale,
+                        proj,
+                        view,
+                        emissive_color=emissive,
+                        object_color=obj_color,
+                        animate_wings=animate_wings,
+                        time_val=time.time() - start_time
                     )
                     
-                    # Swap buffers
-                    window.swap_buffers()
+                    # Render secondary butterfly swarm members if applicable (Module 8)
+                    if active_model_name == "butterfly":
+                        vfx_manager.render_swarm(
+                            renderer, proj, view, pos, rot, scale, time.time() - start_time
+                        )
                     
-                    # Push Telemetry Stats to DPG controller (Module 9)
-                    ui_state.camera_fps = cam.get_fps()
-                    ui_state.active_hands_count = len(hands)
-                    ui_panel.update()
+                    # Interactive particle emissions based on active gestures (Module 7)
+                    if gesture == Gesture.PINCH:
+                        # Dense hot energy sparks at pinch center
+                        pinch_pos = (hand.landmarks_3d[4] + hand.landmarks_3d[8]) * 0.5
+                        particles.spawn(pinch_pos, emitter_type="energy", count=3, base_color=(1.0, 0.2, 0.2))
+                    elif gesture == Gesture.POINTING:
+                        # Fire sparks from index tip
+                        tip_pos = hand.landmarks_3d[8]
+                        particles.spawn(tip_pos, emitter_type="fire", count=2, base_color=(0.2, 1.0, 0.2))
+                    elif gesture == Gesture.PEACE:
+                        # Magic trails from index & middle tips
+                        idx_pos = hand.landmarks_3d[8]
+                        mid_pos = hand.landmarks_3d[12]
+                        particles.spawn(idx_pos, emitter_type="magic", count=1, base_color=(0.3, 0.2, 1.0))
+                        particles.spawn(mid_pos, emitter_type="magic", count=1, base_color=(0.9, 0.2, 1.0))
+                    elif gesture == Gesture.OPEN_PALM:
+                        # Ambient sparkles at palm center
+                        palm_pos = hand.palm_center
+                        particles.spawn(palm_pos, emitter_type="sparkles", count=1, base_color=(1.0, 1.0, 0.9))
+                        
+                # Update particles simulation (Module 7)
+                particles.update(dt)
+                
+                # Render all active particles on top of the models in HDR space (Module 7)
+                particles.render(proj, view)
                     
-                window.process_events()
+                # Perform bloom post-processing, exposure tone-mapping, and composite to screen (Module 9 bindings)
+                renderer.resolve_post_processing(
+                    exposure=ui_state.exposure,
+                    bloom_intensity=ui_state.bloom_intensity,
+                    gamma=ui_state.gamma
+                )
+                
+                # Swap buffers
+                window.swap_buffers()
+                
+                # Push Telemetry Stats to DPG controller (Module 9)
+                ui_state.camera_fps = cam.get_fps()
+                ui_state.active_hands_count = len(hands)
+                
+                import pyglet
+                pyglet.clock.tick()
+                window._window.dispatch_events()
                 
         except KeyboardInterrupt:
             pass
         finally:
-            ui_panel.release()
             particles.release()
             renderer.release()
             tracker.release()

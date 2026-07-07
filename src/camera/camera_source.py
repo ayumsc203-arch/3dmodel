@@ -50,13 +50,25 @@ class CameraSource:
         """Initializes the OpenCV VideoCapture object and applies properties."""
         try:
             logger.info(f"Opening camera index {self.device_index}...")
-            self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW if os_is_windows() else cv2.CAP_ANY)
+            # Try standard stable capture (CAP_ANY uses modern MSMF on Windows, avoiding deadlocks)
+            self.cap = cv2.VideoCapture(self.device_index)
             
             if not self.cap.isOpened():
-                # Fallback to standard backend if CAP_DSHOW fails
-                self.cap = cv2.VideoCapture(self.device_index)
+                # Try camera index 1 if index 0 fails (e.g. laptop virtual cameras)
+                if self.device_index == 0:
+                    logger.warning("Camera index 0 failed. Trying camera index 1...")
+                    self.cap = cv2.VideoCapture(1)
+                    if self.cap.isOpened():
+                        self.device_index = 1
+                        logger.info("Successfully opened fallback camera index 1.")
+                
+                # If still not open, try CAP_DSHOW as final fallback on Windows
+                if not self.cap.isOpened() and os_is_windows():
+                    logger.info("Trying CAP_DSHOW fallback...")
+                    self.cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
+                
                 if not self.cap.isOpened():
-                    logger.error(f"Failed to open camera index {self.device_index}.")
+                    logger.error(f"Failed to open camera source (tried indices 0, 1 and backends).")
                     return False
 
             # Set requested dimensions

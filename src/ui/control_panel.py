@@ -142,13 +142,13 @@ class ControlPanel:
                 # Cyan accents dark theme
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg, [18, 18, 22])
                 dpg.add_theme_color(dpg.mvThemeCol_Header, [28, 48, 58])
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderHover, [40, 68, 80])
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, [40, 68, 80])
                 dpg.add_theme_color(dpg.mvThemeCol_Button, [32, 60, 72])
-                dpg.add_theme_color(dpg.mvThemeCol_ButtonHover, [48, 85, 100])
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, [48, 85, 100])
                 dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, [0, 200, 200])
                 dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, [0, 255, 255])
                 dpg.add_theme_color(dpg.mvThemeCol_FrameBg, [24, 28, 32])
-                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHover, [32, 38, 44])
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, [32, 38, 44])
                 
         dpg.bind_theme(global_theme)
         dpg.show_viewport()
@@ -157,6 +157,13 @@ class ControlPanel:
         """Pulls user inputs from UI widgets to state, updates telemetry labels, and renders frame."""
         if not self.context_created or not dpg.is_dearpygui_running():
             return
+
+        # Synchronize active model combo box with external updates (like swipe gestures)
+        model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm"]
+        current_combo_val = dpg.get_value("active_model_combo")
+        expected_combo_val = model_list[self.state.active_model_idx]
+        if current_combo_val != expected_combo_val:
+            dpg.set_value("active_model_combo", expected_combo_val)
 
         # 1. Update State variables from DPG inputs
         self.state.bloom_intensity = dpg.get_value("bloom_intensity_slider")
@@ -185,12 +192,8 @@ class ControlPanel:
         dpg.render_dearpygui_frame()
 
     def set_active_model_combo(self, idx: int) -> None:
-        """Allows run.py swiping gestures to dynamically update the UI combo selection."""
-        if not self.context_created or not dpg.is_dearpygui_running():
-            return
-        model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm"]
-        if 0 <= idx < len(model_list):
-            dpg.set_value("active_model_combo", model_list[idx])
+        """Deprecated: Synchronization is now handled internally inside update() to ensure thread safety."""
+        pass
 
     def release(self) -> None:
         """Destroys DPG window context."""

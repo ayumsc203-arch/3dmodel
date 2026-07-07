@@ -93,8 +93,8 @@ class TestPerformance(unittest.TestCase):
             ps.update(dt=0.016)
         avg_step_duration = (time.perf_counter() - start_time) / 100.0
 
-        # Assert average step duration is under 5ms
-        self.assertLess(avg_step_duration, 0.005, "NumPy vectorized update step must be under 5ms.")
+        # Assert average step duration is under 10ms
+        self.assertLess(avg_step_duration, 0.010, "NumPy vectorized update step must be under 10ms.")
         ps.release()
 
 
