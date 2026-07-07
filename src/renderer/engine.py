@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from src.renderer.shader_manager import ShaderManager
 from src.renderer.framebuffer import FramebufferManager
+from src.assets.loader import ObjLoader
 
 logger = logging.getLogger("RendererEngine")
 
@@ -30,6 +31,7 @@ class RendererEngine:
         # Managers
         self.shader_manager = ShaderManager(self.ctx)
         self.fbo_manager = FramebufferManager(self.ctx, self.width, self.height)
+        self.loader = ObjLoader(self.ctx)
 
         # Shaders compilation (must run first to bind programs)
         self._init_programs()
@@ -365,6 +367,63 @@ class RendererEngine:
         # Draw final screen quad
         self.bg_vao.render(moderngl.TRIANGLES)
 
+    def render_model(
+        self,
+        model_path: str,
+        position: glm.vec3,
+        rotation: glm.mat4,
+        scale: float,
+        proj_matrix: glm.mat4,
+        view_matrix: glm.mat4,
+        emissive_color: glm.vec3 = glm.vec3(0.0),
+        object_color: glm.vec3 = glm.vec3(1.0),
+        animate_wings: bool = False,
+        time_val: float = 0.0
+    ) -> None:
+        """Renders a loaded OBJ model at the hand's coordinates, applying Blinn-Phong lighting and glow."""
+        try:
+            vbo, vao, vertex_count = self.loader.load_model(model_path, self.model_prog)
+        except Exception as e:
+            logger.error(f"Failed to render 3D model: {e}")
+            return
+
+        # Model matrix: Translation * Rotation * Scale
+        model_matrix = glm.translate(glm.mat4(1.0), position)
+        model_matrix = model_matrix * rotation
+        model_matrix = glm.scale(model_matrix, glm.vec3(scale))
+
+        # View-Projection matrices
+        mvp = proj_matrix * view_matrix * model_matrix
+        normal_matrix = glm.inverseTranspose(glm.mat3(model_matrix))
+
+        # Bind uniforms in model program
+        self.model_prog["Mvp"].write(mvp)
+        self.model_prog["Model"].write(model_matrix)
+        self.model_prog["NormalMatrix"].write(normal_matrix)
+        
+        # Bind animation parameters
+        if "Time" in self.model_prog:
+            self.model_prog["Time"].value = time_val
+        if "AnimateWings" in self.model_prog:
+            self.model_prog["AnimateWings"].value = animate_wings
+        
+        self.model_prog["CameraPos"].write(glm.vec3(0.0, 0.0, 0.0))
+        self.model_prog["ObjectColor"].write(object_color)
+        self.model_prog["EmissiveColor"].write(emissive_color)
+        self.model_prog["UseTexture"].value = False
+        self.model_prog["BloomThreshold"].value = 0.7
+
+        # Set Global overhead directional lighting
+        self.model_prog["DirLightDir"].write(self.dir_light_dir)
+        self.model_prog["DirLightColor"].write(self.dir_light_color)
+
+        # Set Dynamic Point lighting (follows hand palm)
+        self.model_prog["PointLightPos"].write(position)
+        self.model_prog["PointLightColor"].write(self.point_light_color)
+
+        # Draw Mesh
+        vao.render(moderngl.TRIANGLES)
+
     def resize(self, width: int, height: int) -> None:
         """Handles window resize events."""
         self.width = width
@@ -389,5 +448,6 @@ class RendererEngine:
             self.bg_texture.release()
             
         self.line_prog.release()
+        self.loader.clean_cache()
         self.shader_manager.cleanup()
         self.fbo_manager.release()

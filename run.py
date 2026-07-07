@@ -95,6 +95,13 @@ def create_directory_structure() -> None:
             init_file.touch()
             logger.info(f"  [CREATED] __init__.py in {relative_path}")
 
+    # Generate procedural models if they don't exist (Module 6)
+    try:
+        from src.assets.procedural import generate_all_procedural_models
+        generate_all_procedural_models()
+    except Exception as e:
+        logger.error(f"Failed to generate procedural models: {e}")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hand Tracking 3D VFX System Launcher")
@@ -205,6 +212,21 @@ def main() -> None:
         # Initialize ModernGL Renderer Engine (Module 5)
         renderer = RendererEngine(ctx, win_w, win_h)
         
+        # 3D Asset System (Module 6)
+        # Lists of procedural OBJ models generated on setup
+        models_list = [
+            "src/assets/models/orchid.obj",
+            "src/assets/models/wing.obj",
+            "src/assets/models/butterfly.obj"
+        ]
+        model_names = ["orchid", "wing", "butterfly"]
+        active_model_idx = 0
+        
+        # Track previous gesture to enable edge-triggered swipes
+        last_gestures = {"Left": Gesture.UNKNOWN, "Right": Gesture.UNKNOWN}
+        
+        start_time = time.time()
+        
         logger.info("Starting ModernGL VFX loop. Press 'ESC' or close the viewport to exit.")
         try:
             while not window.is_closing:
@@ -242,8 +264,20 @@ def main() -> None:
                     # Render 3D components for active hands
                     for hand in hands:
                         gesture = gesture_detector.update(hand)
+                        label = hand.label
                         
-                        # Extract 3D position
+                        # Edge-triggered swiping to switch models
+                        if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
+                            active_model_idx = (active_model_idx - 1) % 3
+                            logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
+                        elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
+                            active_model_idx = (active_model_idx + 1) % 3
+                            logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
+                            
+                        # Save current gesture state
+                        last_gestures[label] = gesture
+                        
+                        # Extract 3D position (One Euro filtered in HandTracker)
                         pos = glm.vec3(hand.palm_center[0], hand.palm_center[1], hand.palm_center[2])
                         
                         # Extract Orientation Rotation Matrix
@@ -253,36 +287,61 @@ def main() -> None:
                                 rot[col][row] = hand.rotation_matrix[col][row]
                                 
                         # Scale factor of hand
-                        scale = hand.scale * 0.07  # ~7cm default cube scale
+                        scale = hand.scale * 0.4  # Adaptive OBJ scaling
+                        
+                        # Set active model parameters
+                        active_model_path = models_list[active_model_idx]
+                        active_model_name = model_names[active_model_idx]
+                        animate_wings = (active_model_name == "butterfly")
+                        
+                        # Model Base Colors and Emissive profiles
+                        if active_model_name == "orchid":
+                            obj_color = glm.vec3(0.95, 0.45, 0.65)   # Pink/violet orchid
+                            base_emissive = glm.vec3(0.25, 0.08, 0.18)
+                        elif active_model_name == "wing":
+                            obj_color = glm.vec3(1.0, 0.25, 0.1)     # Crimson flame wing
+                            base_emissive = glm.vec3(0.35, 0.08, 0.0)
+                        else:  # butterfly
+                            obj_color = glm.vec3(0.1, 0.65, 1.0)     # Neon blue butterfly
+                            base_emissive = glm.vec3(0.0, 0.2, 0.45)
                         
                         # Map gestures to colors and glow emissive intensities
-                        emissive = glm.vec3(0.0)
-                        box_color = glm.vec3(0.0, 1.0, 1.0)  # Default: Cyan
-                        
                         if gesture == Gesture.CLOSED_FIST:
-                            # Fist shrinks/hides the 3D overlay completely
+                            # Fist hides the 3D model (goes to sleeping state)
                             continue
                         elif gesture == Gesture.PINCH:
-                            # Pinch yields hot red glow
-                            emissive = glm.vec3(3.0, 0.1, 0.1)
+                            # Pinch yields hot red glow boost
+                            emissive = base_emissive * 6.0 + glm.vec3(1.5, 0.0, 0.0)
                             box_color = glm.vec3(1.0, 0.1, 0.1)
                         elif gesture == Gesture.PEACE:
-                            # Peace yields electric blue glow
-                            emissive = glm.vec3(0.1, 0.1, 3.0)
+                            # Peace yields electric blue glow boost
+                            emissive = base_emissive * 6.0 + glm.vec3(0.0, 0.0, 1.5)
                             box_color = glm.vec3(0.1, 0.1, 1.0)
                         elif gesture == Gesture.POINTING:
-                            # Pointing yields green glow
-                            emissive = glm.vec3(0.1, 3.0, 0.1)
+                            # Pointing yields green glow boost
+                            emissive = base_emissive * 6.0 + glm.vec3(0.0, 1.5, 0.0)
                             box_color = glm.vec3(0.1, 1.0, 0.1)
                         else:
-                            # Default open palm yields soft white glow
-                            emissive = glm.vec3(0.4, 0.4, 0.4)
+                            # Default palm open uses base glow
+                            emissive = base_emissive
+                            box_color = obj_color
                             
-                        # Render wireframe box (Module 5 Visual calibration)
+                        # Render wireframe bounding box
                         renderer.render_bounding_box(pos, rot, scale, proj, view, box_color)
                         
-                        # Render lit 3D Cube
-                        renderer.render_cube(pos, rot, scale, proj, view, emissive)
+                        # Render 3D Model with lighting and animation time parameter
+                        renderer.render_model(
+                            active_model_path,
+                            pos,
+                            rot,
+                            scale,
+                            proj,
+                            view,
+                            emissive_color=emissive,
+                            object_color=obj_color,
+                            animate_wings=animate_wings,
+                            time_val=time.time() - start_time
+                        )
                         
                     # Perform bloom post-processing, exposure tone-mapping, and composite to screen
                     bloom_conf = render_conf.get("bloom", {})
