@@ -157,6 +157,8 @@ def main() -> None:
         from src.tracking.gesture_detector import GestureDetector, Gesture
         from src.renderer.engine import RendererEngine
         from src.particles.particle_system import ParticleSystem
+        from src.effects.vfx_manager import VfxManager
+        from src.ui.control_panel import UIState, ControlPanel
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -232,17 +234,43 @@ def main() -> None:
         particles = ParticleSystem(ctx, max_particles=3000)
         last_time = time.time()
         
+        # Initialize VFX Manager (Module 8)
+        vfx_manager = VfxManager(particles)
+        
+        # Initialize UI Control Panel (Module 9)
+        ui_state = UIState()
+        ui_panel = ControlPanel(ui_state)
+        ui_panel.setup()
+        
         logger.info("Starting ModernGL VFX loop. Press 'ESC' or close the viewport to exit.")
         try:
-            while not window.is_closing:
+            while not window.is_closing and dpg.is_dearpygui_running():
                 ret, frame = cam.read()
                 if ret and frame is not None:
+                    # Update physics simulator frame time (Modules 7 & 8)
+                    current_time = time.time()
+                    dt = current_time - last_time
+                    last_time = current_time
+                    dt = min(max(dt, 0.001), 0.1) # Clamp dt bounds
+                    
+                    # Reset telemetry stats for UI updates (Module 9)
+                    ui_state.left_gesture = "None"
+                    ui_state.right_gesture = "None"
+                    ui_state.left_palm_pos = (0.0, 0.0, 0.0)
+                    ui_state.right_palm_pos = (0.0, 0.0, 0.0)
+
                     # Update webcam background texture (MediaPipe/OpenGL wants RGB)
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     renderer.update_background_texture(frame_rgb)
                     
                     # Bind HDR FBO and clear with camera quad background
                     renderer.prepare_scene()
+                    
+                    # Synchronize active model selection with UI State (Module 9)
+                    active_model_idx = ui_state.active_model_idx
+                    
+                    # Synchronize smoothing status (Module 9)
+                    tracker.smoothing_enabled = ui_state.smoothing_enabled
                     
                     # Track hands
                     hands = tracker.process_frame(frame, cam.camera_matrix)
@@ -271,17 +299,32 @@ def main() -> None:
                         gesture = gesture_detector.update(hand)
                         label = hand.label
                         
-                        # Edge-triggered swiping to switch models
+                        # Edge-triggered swiping to cycle models (updates DPG selector dynamically)
                         if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
                             active_model_idx = (active_model_idx - 1) % 3
+                            ui_state.active_model_idx = active_model_idx
+                            ui_panel.set_active_model_combo(active_model_idx)
                             logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
                         elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
                             active_model_idx = (active_model_idx + 1) % 3
+                            ui_state.active_model_idx = active_model_idx
+                            ui_panel.set_active_model_combo(active_model_idx)
                             logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
                             
                         # Save current gesture state
                         last_gestures[label] = gesture
                         
+                        # Extract active model parameters
+                        active_model_path = models_list[active_model_idx]
+                        active_model_name = model_names[active_model_idx]
+                        
+                        # Update VFX Manager transitions, trails, and swarms (Module 8)
+                        vfx_manager.update(dt, hand, active_model_name, gesture)
+                        
+                        # If scale is near zero, the overlay is hidden
+                        if vfx_manager.transition_scale <= 0.01:
+                            continue
+                            
                         # Extract 3D position (One Euro filtered in HandTracker)
                         pos = glm.vec3(hand.palm_center[0], hand.palm_center[1], hand.palm_center[2])
                         
@@ -290,14 +333,20 @@ def main() -> None:
                         for col in range(3):
                             for row in range(3):
                                 rot[col][row] = hand.rotation_matrix[col][row]
-                                
-                        # Scale factor of hand
-                        scale = hand.scale * 0.4  # Adaptive OBJ scaling
                         
-                        # Set active model parameters
-                        active_model_path = models_list[active_model_idx]
-                        active_model_name = model_names[active_model_idx]
-                        animate_wings = (active_model_name == "butterfly")
+                        # Update telemetry positions for UI (Module 9)
+                        if label == "Left":
+                            ui_state.left_gesture = gesture.value.upper()
+                            ui_state.left_palm_pos = (pos.x, pos.y, pos.z)
+                        else:
+                            ui_state.right_gesture = gesture.value.upper()
+                            ui_state.right_palm_pos = (pos.x, pos.y, pos.z)
+                            
+                        # Scale factor of hand, smoothly animated by transition scale
+                        scale = hand.scale * 0.4 * vfx_manager.transition_scale
+                        
+                        # Sync wing fluttering settings from UI panel (Module 9)
+                        animate_wings = ui_state.animate_wings and (active_model_name == "butterfly")
                         
                         # Model Base Colors and Emissive profiles
                         if active_model_name == "orchid":
@@ -348,6 +397,12 @@ def main() -> None:
                             time_val=time.time() - start_time
                         )
                         
+                        # Render secondary butterfly swarm members if applicable (Module 8)
+                        if active_model_name == "butterfly":
+                            vfx_manager.render_swarm(
+                                renderer, proj, view, pos, rot, scale, time.time() - start_time
+                            )
+                        
                         # Interactive particle emissions based on active gestures (Module 7)
                         if gesture == Gesture.PINCH:
                             # Dense hot energy sparks at pinch center
@@ -368,39 +423,33 @@ def main() -> None:
                             palm_pos = hand.palm_center
                             particles.spawn(palm_pos, emitter_type="sparkles", count=1, base_color=(1.0, 1.0, 0.9))
                             
-                    # Update physics simulator frame time (Module 7)
-                    current_time = time.time()
-                    dt = current_time - last_time
-                    last_time = current_time
-                    dt = min(max(dt, 0.001), 0.1) # Clamp dt bounds
-                    
+                    # Update particles simulation (Module 7)
                     particles.update(dt)
                     
                     # Render all active particles on top of the models in HDR space (Module 7)
                     particles.render(proj, view)
                         
-                    # Perform bloom post-processing, exposure tone-mapping, and composite to screen
-                    bloom_conf = render_conf.get("bloom", {})
-                    bloom_intensity = bloom_conf.get("intensity", 1.2)
-                    
-                    tone_conf = render_conf.get("tonemapping", {})
-                    exposure = tone_conf.get("exposure", 1.0)
-                    gamma = tone_conf.get("gamma", 2.2)
-                    
+                    # Perform bloom post-processing, exposure tone-mapping, and composite to screen (Module 9 bindings)
                     renderer.resolve_post_processing(
-                        exposure=exposure,
-                        bloom_intensity=bloom_intensity,
-                        gamma=gamma
+                        exposure=ui_state.exposure,
+                        bloom_intensity=ui_state.bloom_intensity,
+                        gamma=ui_state.gamma
                     )
                     
                     # Swap buffers
                     window.swap_buffers()
+                    
+                    # Push Telemetry Stats to DPG controller (Module 9)
+                    ui_state.camera_fps = cam.get_fps()
+                    ui_state.active_hands_count = len(hands)
+                    ui_panel.update()
                     
                 window.process_events()
                 
         except KeyboardInterrupt:
             pass
         finally:
+            ui_panel.release()
             particles.release()
             renderer.release()
             tracker.release()
