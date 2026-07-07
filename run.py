@@ -156,6 +156,7 @@ def main() -> None:
         from src.tracking.hand_tracker import HandTracker
         from src.tracking.gesture_detector import GestureDetector, Gesture
         from src.renderer.engine import RendererEngine
+        from src.particles.particle_system import ParticleSystem
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -226,6 +227,10 @@ def main() -> None:
         last_gestures = {"Left": Gesture.UNKNOWN, "Right": Gesture.UNKNOWN}
         
         start_time = time.time()
+        
+        # Initialize Particle Engine (Module 7)
+        particles = ParticleSystem(ctx, max_particles=3000)
+        last_time = time.time()
         
         logger.info("Starting ModernGL VFX loop. Press 'ESC' or close the viewport to exit.")
         try:
@@ -343,6 +348,37 @@ def main() -> None:
                             time_val=time.time() - start_time
                         )
                         
+                        # Interactive particle emissions based on active gestures (Module 7)
+                        if gesture == Gesture.PINCH:
+                            # Dense hot energy sparks at pinch center
+                            pinch_pos = (hand.landmarks_3d[4] + hand.landmarks_3d[8]) * 0.5
+                            particles.spawn(pinch_pos, emitter_type="energy", count=3, base_color=(1.0, 0.2, 0.2))
+                        elif gesture == Gesture.POINTING:
+                            # Fire sparks from index tip
+                            tip_pos = hand.landmarks_3d[8]
+                            particles.spawn(tip_pos, emitter_type="fire", count=2, base_color=(0.2, 1.0, 0.2))
+                        elif gesture == Gesture.PEACE:
+                            # Magic trails from index & middle tips
+                            idx_pos = hand.landmarks_3d[8]
+                            mid_pos = hand.landmarks_3d[12]
+                            particles.spawn(idx_pos, emitter_type="magic", count=1, base_color=(0.3, 0.2, 1.0))
+                            particles.spawn(mid_pos, emitter_type="magic", count=1, base_color=(0.9, 0.2, 1.0))
+                        elif gesture == Gesture.OPEN_PALM:
+                            # Ambient sparkles at palm center
+                            palm_pos = hand.palm_center
+                            particles.spawn(palm_pos, emitter_type="sparkles", count=1, base_color=(1.0, 1.0, 0.9))
+                            
+                    # Update physics simulator frame time (Module 7)
+                    current_time = time.time()
+                    dt = current_time - last_time
+                    last_time = current_time
+                    dt = min(max(dt, 0.001), 0.1) # Clamp dt bounds
+                    
+                    particles.update(dt)
+                    
+                    # Render all active particles on top of the models in HDR space (Module 7)
+                    particles.render(proj, view)
+                        
                     # Perform bloom post-processing, exposure tone-mapping, and composite to screen
                     bloom_conf = render_conf.get("bloom", {})
                     bloom_intensity = bloom_conf.get("intensity", 1.2)
@@ -365,6 +401,7 @@ def main() -> None:
         except KeyboardInterrupt:
             pass
         finally:
+            particles.release()
             renderer.release()
             tracker.release()
             cam.stop()
