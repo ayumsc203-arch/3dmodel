@@ -144,6 +144,8 @@ def main() -> None:
         import yaml
         import cv2
         from src.camera.camera_source import CameraSource
+        from src.tracking.hand_tracker import HandTracker
+        from src.tracking.gesture_detector import GestureDetector
 
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
@@ -163,12 +165,59 @@ def main() -> None:
             sys.exit(1)
             
         cam.start()
+
+        # Initialize Hand Tracker (Module 3)
+        track_conf = config.get("tracking", {})
+        tracker = HandTracker(
+            max_num_hands=track_conf.get("max_num_hands", 2),
+            min_detection_confidence=track_conf.get("min_detection_confidence", 0.7),
+            min_tracking_confidence=track_conf.get("min_tracking_confidence", 0.7),
+            smoothing_enabled=track_conf.get("smoothing", {}).get("enabled", True),
+            filter_min_cutoff=track_conf.get("smoothing", {}).get("min_cutoff", 0.8),
+            filter_beta=track_conf.get("smoothing", {}).get("beta", 0.02)
+        )
+
+        # Initialize Gesture Detector (Module 4)
+        gesture_detector = GestureDetector()
         
         logger.info("Press 'ESC' or 'q' in the camera window to exit.")
         try:
             while True:
                 ret, frame = cam.read()
                 if ret and frame is not None:
+                    # Process hand tracking
+                    hands = tracker.process_frame(frame, cam.camera_matrix)
+                    for hand in hands:
+                        # Draw skeletal overlays
+                        tracker.draw_skeleton(frame, hand)
+                        
+                        # Process gestures
+                        gesture = gesture_detector.update(hand)
+                        
+                        # Draw overlay statistics and active gesture near the wrist joint
+                        wrist_pos = hand.landmarks_2d[0]
+                        cv2.putText(
+                            frame,
+                            f"Gesture: {gesture.value.upper()}",
+                            (int(wrist_pos[0]), int(wrist_pos[1]) - 40),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,
+                            (0, 255, 255),  # Cyan
+                            2,
+                            cv2.LINE_AA
+                        )
+                        
+                        cv2.putText(
+                            frame,
+                            f"{hand.label} (Scale: {hand.scale:.2f}, Z: {hand.palm_center[2]:.2f}m)",
+                            (int(wrist_pos[0]), int(wrist_pos[1]) - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (255, 255, 255),
+                            1,
+                            cv2.LINE_AA
+                        )
+
                     # Draw FPS overlay
                     fps = cam.get_fps()
                     cv2.putText(
@@ -189,6 +238,7 @@ def main() -> None:
         except KeyboardInterrupt:
             pass
         finally:
+            tracker.release()
             cam.stop()
             cv2.destroyAllWindows()
             logger.info("System shut down cleanly.")

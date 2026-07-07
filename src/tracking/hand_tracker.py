@@ -2,8 +2,12 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
+import urllib.request
 import logging
+from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
+from mediapipe.tasks.python import vision
+from mediapipe.tasks import python
 from src.tracking.filters import OneEuroFilter
 
 logger = logging.getLogger("HandTracker")
@@ -21,9 +25,18 @@ class HandData(NamedTuple):
 
 class HandTracker:
     """
-    Integrates MediaPipe Hands with stabilization filters.
+    Integrates MediaPipe HandLandmarker Tasks API with stabilization filters.
     Computes 3D coordinates, orientation matrices, and provides dual-hand tracking.
     """
+
+    # Static hand skeleton connections list (independent of legacy solutions API)
+    HAND_CONNECTIONS = [
+        (0, 1), (1, 2), (2, 3), (3, 4),        # Thumb
+        (0, 5), (5, 6), (6, 7), (7, 8),        # Index
+        (5, 9), (9, 10), (10, 11), (11, 12),   # Middle
+        (9, 13), (13, 14), (14, 15), (15, 16), # Ring
+        (13, 17), (0, 17), (17, 18), (18, 19), (19, 20) # Pinky
+    ]
 
     def __init__(
         self,
@@ -32,7 +45,8 @@ class HandTracker:
         min_tracking_confidence: float = 0.7,
         smoothing_enabled: bool = True,
         filter_min_cutoff: float = 0.8,
-        filter_beta: float = 0.02
+        filter_beta: float = 0.02,
+        model_path: str = "config/hand_landmarker.task"
     ):
         self.max_num_hands = max_num_hands
         self.min_detection_confidence = min_detection_confidence
@@ -43,25 +57,42 @@ class HandTracker:
         self.filter_min_cutoff = filter_min_cutoff
         self.filter_beta = filter_beta
 
-        # MediaPipe Solutions
-        self.mp_hands = mp.solutions.hands
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.mp_drawing_styles = mp.solutions.drawing_styles
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=self.max_num_hands,
-            model_complexity=1,
-            min_detection_confidence=self.min_detection_confidence,
-            min_tracking_confidence=self.min_tracking_confidence
-        )
+        # Ensure the model file exists, download if necessary
+        self.model_path = Path(__file__).parent.parent.parent.resolve() / model_path
+        self._check_and_download_model()
 
-        # Filters dictionary: keys are strings like "Left_0", "Right_20" representing hand side + landmark index
+        # Initialize Hand Landmarker Task Detector
+        logger.info("Initializing MediaPipe HandLandmarker Tasks detector...")
+        base_options = python.BaseOptions(model_asset_path=str(self.model_path))
+        options = vision.HandLandmarkerOptions(
+            base_options=base_options,
+            num_hands=self.max_num_hands,
+            min_hand_detection_confidence=self.min_detection_confidence,
+            min_hand_presence_confidence=self.min_detection_confidence,
+            min_tracking_confidence=self.min_tracking_confidence,
+            running_mode=vision.RunningMode.IMAGE
+        )
+        self.detector = vision.HandLandmarker.create_from_options(options)
+
+        # Filters dictionary: keys are strings like "Left_0_x", etc.
         self.filters: Dict[str, OneEuroFilter] = {}
-        # Filters for palm center and orientation (Euler angles)
         self.palm_filters: Dict[str, OneEuroFilter] = {}
 
         # Estimated physical constants
         self.PHYSICAL_PALM_SIZE = 0.085  # Average distance in meters between Wrist (0) and Index MCP (5)
+
+    def _check_and_download_model(self) -> None:
+        """Downloads the hand landmarker task file if it is missing."""
+        if not self.model_path.exists():
+            self.model_path.parent.mkdir(parents=True, exist_ok=True)
+            url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
+            logger.info(f"Model file not found. Downloading from {url}...")
+            try:
+                urllib.request.urlretrieve(url, self.model_path)
+                logger.info(f"Model successfully saved to {self.model_path}")
+            except Exception as e:
+                logger.critical(f"Failed to download MediaPipe model: {e}")
+                raise FileNotFoundError(f"Missing hand tracking model: {self.model_path}") from e
 
     def _get_filter(self, key: str) -> OneEuroFilter:
         """Retrieves or creates a One Euro Filter instance for a specific landmark/parameter."""
@@ -91,17 +122,16 @@ class HandTracker:
         applies One Euro Filters, and computes spatial transforms.
         """
         height, width, _ = frame.shape
-        # Convert BGR to RGB for MediaPipe
+        # Convert BGR to RGB and build MediaPipe Image object
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
         
-        # Disable writing on image to optimize memory performance
-        frame_rgb.flags.writeable = False
-        results = self.hands.process(frame_rgb)
-        frame_rgb.flags.writeable = True
+        # Detect hands
+        result = self.detector.detect(mp_image)
 
         tracked_hands: List[HandData] = []
 
-        if not results.multi_hand_landmarks or not results.multi_handedness:
+        if not result.hand_landmarks or not result.handedness:
             # No hands detected, reset filter states to prevent lag jumps when hands reappear
             self.reset_filters()
             return tracked_hands
@@ -112,14 +142,14 @@ class HandTracker:
         cx = camera_matrix[0, 2]
         cy = camera_matrix[1, 2]
 
-        for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-            # MediaPipe hands label is mirrored inside standard mirror modes
-            # We obtain standard labels: "Left" or "Right"
-            label = handedness.classification[0].label
+        for hand_idx, landmarks in enumerate(result.hand_landmarks):
+            handedness_list = result.handedness[hand_idx]
+            # Handedness label: "Left" or "Right"
+            label = handedness_list[0].category_name if handedness_list else "Unknown"
 
             # 1. Gather raw 2D pixel coordinates and depth estimate proxy
             landmarks_2d = np.zeros((21, 2), dtype=np.float32)
-            for idx, lm in enumerate(hand_landmarks.landmark):
+            for idx, lm in enumerate(landmarks):
                 landmarks_2d[idx] = [lm.x * width, lm.y * height]
 
             # Estimate depth (Z) based on physical palm size in pixels
@@ -136,16 +166,14 @@ class HandTracker:
 
             # 2. Convert landmarks to 3D metric space (in meters relative to camera)
             raw_landmarks_3d = np.zeros((21, 3), dtype=np.float32)
-            for idx, lm in enumerate(hand_landmarks.landmark):
-                # Backproject: X = (x_px - cx) * Z / fx
+            for idx, lm in enumerate(landmarks):
                 px_x = lm.x * width
                 px_y = lm.y * height
                 
+                # Backproject: X = (x_px - cx) * Z / fx
                 x_metric = (px_x - cx) * estimated_depth / fx
                 y_metric = -(px_y - cy) * estimated_depth / fy  # Invert Y to match OpenGL space (up is positive)
-                # MediaPipe's Z is relative and scaled similarly to X.
-                # We combine our calculated base depth with MediaPipe's relative depth
-                # MediaPipe's Z coordinate is scaled such that it represents relative depth in meters
+                # MediaPipe's Z represents depth relative to the wrist, scaled similarly to X.
                 z_metric = -estimated_depth + (lm.z * self.PHYSICAL_PALM_SIZE)
                 
                 raw_landmarks_3d[idx] = [x_metric, y_metric, z_metric]
@@ -174,16 +202,12 @@ class HandTracker:
 
             # Orthonormalization (Gram-Schmidt)
             u_norm = u / np.linalg.norm(u)
-            # Normal vector pointing out of palm (cross product)
-            # We adapt cross product order for left vs right hand orientation alignment
             if label == "Right":
                 normal = np.cross(u_norm, v)
             else:
                 normal = np.cross(v, u_norm)
                 
             normal_norm = normal / np.linalg.norm(normal)
-            
-            # Tangent direction (orthogonal to u and normal)
             tangent = np.cross(normal_norm, u_norm)
             tangent_norm = tangent / np.linalg.norm(tangent)
 
@@ -224,7 +248,6 @@ class HandTracker:
     def _filter_rotation(self, label: str, rot_mat: np.ndarray, t: float) -> np.ndarray:
         """Extracts Euler angles, applies One Euro filter, and reconstructs rotation matrix."""
         # Deconstruct rotation matrix to Euler angles (yaw, pitch, roll)
-        # R = Rz(roll) * Ry(pitch) * Rx(yaw)
         pitch = np.arcsin(-rot_mat[2, 1])
         if np.abs(np.cos(pitch)) > 1e-6:
             yaw = np.arctan2(rot_mat[2, 0], rot_mat[2, 2])
@@ -265,15 +288,13 @@ class HandTracker:
 
     def draw_skeleton(self, frame: np.ndarray, hand_data: HandData) -> None:
         """Helper to draw stabilized skeleton lines and joint points on a frame."""
-        # Convert landmarks back to 2D tuples
         points = [tuple(pt.astype(int)) for pt in hand_data.landmarks_2d]
         
         # Color coding: Green for Right hand, Red for Left hand
         color = (0, 255, 0) if hand_data.label == "Right" else (0, 0, 255)
         
         # Draw connections
-        for connection in self.mp_hands.HAND_CONNECTIONS:
-            start_idx, end_idx = connection
+        for start_idx, end_idx in self.HAND_CONNECTIONS:
             if start_idx < len(points) and end_idx < len(points):
                 cv2.line(frame, points[start_idx], points[end_idx], color, 2)
                 
@@ -290,5 +311,5 @@ class HandTracker:
             filt.reset()
 
     def release(self) -> None:
-        """Clean up MediaPipe resources."""
-        self.hands.close()
+        """Clean up detector resources."""
+        self.detector.close()
