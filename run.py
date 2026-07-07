@@ -151,6 +151,7 @@ def main() -> None:
         import yaml
         import cv2
         import glm
+        import time
         import moderngl_window as mglw
         from src.camera.camera_source import CameraSource
         from src.tracking.hand_tracker import HandTracker
@@ -171,7 +172,8 @@ def main() -> None:
 
         logger.info("Initializing ModernGL window...")
         mglw.setup_basic_logging(logger.level)
-        window = mglw.create_window_from_settings({
+        from moderngl_window import settings
+        settings.WINDOW = {
             "class": "moderngl_window.context.pyglet.Window",
             "title": "Hand Tracking 3D VFX System - ModernGL Viewport",
             "size": (win_w, win_h),
@@ -179,7 +181,8 @@ def main() -> None:
             "resizable": False,
             "vsync": vsync,
             "gl_version": (3, 3)
-        })
+        }
+        window = mglw.create_window_from_settings()
         ctx = window.ctx
 
         # Initialize Camera System (Module 2)
