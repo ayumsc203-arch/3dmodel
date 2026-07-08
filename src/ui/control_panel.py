@@ -105,7 +105,7 @@ class ControlPanel:
 
             # 3. 3D Asset Settings Section
             with dpg.collapsing_header(label="3D ASSETS SELECTION", default_open=True):
-                models_items = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm"]
+                models_items = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon"]
                 dpg.add_combo(
                     items=models_items,
                     label="Active Asset",
@@ -113,7 +113,7 @@ class ControlPanel:
                     default_value=models_items[self.state.active_model_idx]
                 )
                 dpg.add_checkbox(
-                    label="Animate Wings (Butterfly)",
+                    label="Animate Wings (Butterfly/Phoenix/Dragon)",
                     tag="animate_wings_checkbox",
                     default_value=self.state.animate_wings
                 )
@@ -159,7 +159,7 @@ class ControlPanel:
             return
 
         # Synchronize active model combo box with external updates (like swipe gestures)
-        model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm"]
+        model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon"]
         current_combo_val = dpg.get_value("active_model_combo")
         expected_combo_val = model_list[self.state.active_model_idx]
         if current_combo_val != expected_combo_val:
@@ -171,7 +171,13 @@ class ControlPanel:
         self.state.gamma = dpg.get_value("gamma_slider")
         
         model_str = dpg.get_value("active_model_combo")
-        model_map = {"Orchid Plant": 0, "Fantasy Wing": 1, "Butterfly Swarm": 2}
+        model_map = {
+            "Orchid Plant": 0,
+            "Fantasy Wing": 1,
+            "Butterfly Swarm": 2,
+            "Phoenix Bird": 3,
+            "Dark Dragon": 4
+        }
         self.state.active_model_idx = model_map.get(model_str, 0)
         
         self.state.animate_wings = dpg.get_value("animate_wings_checkbox")

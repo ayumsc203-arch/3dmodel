@@ -122,6 +122,37 @@ class VfxManager:
                 if random.random() < 0.35:
                     self.particles.spawn(member_world_pos, emitter_type="sparkles", count=1, base_color=(0.2, 0.7, 1.0))
 
+        elif active_model_name == "phoenix":
+            # Phoenix effect: Fiery Wing Trail and Golden Tail Sparkles
+            for _ in range(2):
+                # Wing sparkles
+                local_span = random.uniform(-1.0, 1.0)
+                local_pos = np.array([local_span * 0.9, 0.0, -0.05], dtype=np.float32)
+                world_pos = palm_pos + rot_mat @ (local_pos * hand_scale * 2.2)
+                self.particles.spawn(world_pos, emitter_type="fire", count=1, base_color=(1.0, 0.4, 0.1))
+                
+            if random.random() < 0.5:
+                # Tail sparkles
+                tail_t = random.uniform(0.3, 0.9)
+                local_pos = np.array([random.uniform(-0.1, 0.1), -tail_t * 0.7, -tail_t * 0.4], dtype=np.float32)
+                world_pos = palm_pos + rot_mat @ (local_pos * hand_scale * 2.0)
+                self.particles.spawn(world_pos, emitter_type="energy", count=1, base_color=(1.0, 0.8, 0.2))
+
+        elif active_model_name == "dragon":
+            # Dragon effect: Neon purple wing trails and tail sparks
+            for _ in range(2):
+                # Wing sparks
+                local_span = random.uniform(-1.0, 1.0)
+                local_pos = np.array([local_span * 1.2, 0.0, -0.2], dtype=np.float32)
+                world_pos = palm_pos + rot_mat @ (local_pos * hand_scale * 2.0)
+                self.particles.spawn(world_pos, emitter_type="magic", count=1, base_color=(0.6, 0.0, 0.9))
+                
+            if random.random() < 0.4:
+                # Tail tip sparks
+                local_pos = np.array([0.0, 0.0, -0.9], dtype=np.float32)
+                world_pos = palm_pos + rot_mat @ (local_pos * hand_scale * 2.0)
+                self.particles.spawn(world_pos, emitter_type="energy", count=1, base_color=(0.8, 0.1, 0.8))
+
     def render_swarm(
         self, 
         renderer, 

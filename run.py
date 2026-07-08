@@ -224,9 +224,11 @@ def main() -> None:
         models_list = [
             "src/assets/models/orchid.obj",
             "src/assets/models/wing.obj",
-            "src/assets/models/butterfly.obj"
+            "src/assets/models/butterfly.obj",
+            "src/assets/models/phoenix.obj",
+            "src/assets/models/dragon.obj"
         ]
-        model_names = ["orchid", "wing", "butterfly"]
+        model_names = ["orchid", "wing", "butterfly", "phoenix", "dragon"]
         active_model_idx = 0
         
         # Track previous gesture to enable edge-triggered swipes
@@ -318,12 +320,12 @@ def main() -> None:
                     
                     # Edge-triggered swiping to cycle models (updates DPG selector dynamically)
                     if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
-                        active_model_idx = (active_model_idx - 1) % 3
+                        active_model_idx = (active_model_idx - 1) % 5
                         ui_state.active_model_idx = active_model_idx
                         ui_panel.set_active_model_combo(active_model_idx)
                         logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
                     elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
-                        active_model_idx = (active_model_idx + 1) % 3
+                        active_model_idx = (active_model_idx + 1) % 5
                         ui_state.active_model_idx = active_model_idx
                         ui_panel.set_active_model_combo(active_model_idx)
                         logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
@@ -363,7 +365,7 @@ def main() -> None:
                     scale = hand.scale * 0.4 * vfx_manager.transition_scale
                     
                     # Sync wing fluttering settings from UI panel (Module 9)
-                    animate_wings = ui_state.animate_wings and (active_model_name == "butterfly")
+                    animate_wings = ui_state.animate_wings and (active_model_name in ["butterfly", "phoenix", "dragon"])
                     
                     # Model Base Colors and Emissive profiles
                     if active_model_name == "orchid":
@@ -372,9 +374,15 @@ def main() -> None:
                     elif active_model_name == "wing":
                         obj_color = glm.vec3(1.0, 0.25, 0.1)     # Crimson flame wing
                         base_emissive = glm.vec3(0.35, 0.08, 0.0)
-                    else:  # butterfly
+                    elif active_model_name == "butterfly":
                         obj_color = glm.vec3(0.1, 0.65, 1.0)     # Neon blue butterfly
                         base_emissive = glm.vec3(0.0, 0.2, 0.45)
+                    elif active_model_name == "phoenix":
+                        obj_color = glm.vec3(1.0, 0.6, 0.1)      # Golden orange phoenix
+                        base_emissive = glm.vec3(0.8, 0.15, 0.0)
+                    else:  # dragon
+                        obj_color = glm.vec3(0.3, 0.05, 0.4)     # Deep violet dragon
+                        base_emissive = glm.vec3(0.6, 0.0, 0.8)
                     
                     # Map gestures to colors and glow emissive intensities
                     if gesture == Gesture.PINCH:

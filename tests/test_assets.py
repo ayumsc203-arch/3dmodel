@@ -4,7 +4,11 @@ import os
 import numpy as np
 from pathlib import Path
 from src.assets.loader import ObjLoader
-from src.assets.procedural import generate_butterfly_model
+from src.assets.procedural import (
+    generate_butterfly_model,
+    generate_phoenix_model,
+    generate_dragon_model
+)
 
 
 class TestAssets(unittest.TestCase):
@@ -83,6 +87,46 @@ class TestAssets(unittest.TestCase):
         self.greaterThan(os.path.getsize(file_path), 0)
 
         # Read the generated OBJ file lines and confirm vertices count
+        v_count = 0
+        f_count = 0
+        with open(file_path, "r") as f:
+            for line in f:
+                if line.startswith("v "):
+                    v_count += 1
+                elif line.startswith("f "):
+                    f_count += 1
+                    
+        self.greaterThan(v_count, 0)
+        self.greaterThan(f_count, 0)
+
+    def test_procedural_phoenix_generation(self):
+        """Test generating and parsing the procedural phoenix model."""
+        file_path = self.test_dir / "test_phoenix.obj"
+        generate_phoenix_model(file_path)
+        
+        self.assertTrue(file_path.exists())
+        self.greaterThan(os.path.getsize(file_path), 0)
+
+        v_count = 0
+        f_count = 0
+        with open(file_path, "r") as f:
+            for line in f:
+                if line.startswith("v "):
+                    v_count += 1
+                elif line.startswith("f "):
+                    f_count += 1
+                    
+        self.greaterThan(v_count, 0)
+        self.greaterThan(f_count, 0)
+
+    def test_procedural_dragon_generation(self):
+        """Test generating and parsing the procedural dragon model."""
+        file_path = self.test_dir / "test_dragon.obj"
+        generate_dragon_model(file_path)
+        
+        self.assertTrue(file_path.exists())
+        self.greaterThan(os.path.getsize(file_path), 0)
+
         v_count = 0
         f_count = 0
         with open(file_path, "r") as f:
