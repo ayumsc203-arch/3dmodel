@@ -3,8 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Hand VFX - Sketchfab Overlay Dashboard</title>
+    <title>3D Hand VFX - Browser Hand Tracking Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Load MediaPipe Hands CDN Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
     <style>
         :root {
             --primary: #00f0ff;
@@ -59,10 +64,11 @@
             height: 600px;
             z-index: 5;
             pointer-events: auto;
-            transition: transform 0.2s ease-out;
+            transition: opacity 0.4s ease;
             display: flex;
             justify-content: center;
             align-items: center;
+            opacity: 0; /* Hidden by default until hand detected or manual mode enabled */
         }
 
         .sketchfab-embed-wrapper {
@@ -246,6 +252,12 @@
             border-radius: 16px;
             border: 1px solid rgba(255, 255, 255, 0.05);
             margin-bottom: 12px;
+            transition: opacity 0.3s;
+        }
+
+        .range-container.disabled {
+            opacity: 0.35;
+            pointer-events: none;
         }
 
         .range-header {
@@ -281,7 +293,7 @@
 
         /* Drag handle indicator overlay */
         #model-overlay-container::before {
-            content: 'Drag to Move';
+            content: 'Hand Tracking Active';
             position: absolute;
             top: -24px;
             left: 50%;
@@ -295,7 +307,7 @@
             pointer-events: none;
         }
 
-        #model-overlay-container:hover::before {
+        #model-overlay-container.tracking::before {
             opacity: 0.8;
         }
 
@@ -350,6 +362,12 @@
             text-transform: uppercase;
         }
 
+        .badge.secondary {
+            background: rgba(255, 0, 127, 0.1);
+            color: var(--secondary);
+            border-color: rgba(255, 0, 127, 0.2);
+        }
+
         .pulse {
             width: 8px;
             height: 8px;
@@ -357,6 +375,11 @@
             border-radius: 50%;
             box-shadow: 0 0 10px var(--primary);
             animation: pulse-glow 2s infinite;
+        }
+
+        .pulse.secondary {
+            background: var(--secondary);
+            box-shadow: 0 0 10px var(--secondary);
         }
 
         @keyframes pulse-glow {
@@ -388,10 +411,25 @@
         </div>
 
         <div id="status-bar">
-            <div class="badge">
+            <div class="badge" id="camera-status">
                 <div class="pulse"></div>
-                Webcam Stream Active
+                Webcam Connecting...
             </div>
+            <div class="badge secondary" id="tracking-status" style="display: none;">
+                <div class="pulse secondary"></div>
+                Hand Tracked
+            </div>
+        </div>
+
+        <!-- Section: Tracking Settings -->
+        <div class="section-title">AI Tracking Setup</div>
+        
+        <div class="toggle-container">
+            <span>Enable Web Hand Tracking</span>
+            <label class="switch">
+                <input type="checkbox" id="web-hand-tracking" onchange="toggleTrackingMode()" checked>
+                <span class="slider"></span>
+            </label>
         </div>
 
         <!-- Section: VFX Models -->
@@ -399,7 +437,7 @@
         <div class="control-group">
             <label for="model-selector">Active 3D Model</label>
             <select id="model-selector" onchange="loadModel()">
-                <option value="59c1bf78e8b543299d2d68581d2e6c0d">Enchanted Dark Dragon (by Kyan0s)</option>
+                <option value="59c1bf78e8b543299d2d68581d2e6c0d" selected>Enchanted Dark Dragon (by Kyan0s)</option>
                 <option value="844ba0cf144a413ea92c779f18912042">Phoenix Bird (by NORBERTO-3D)</option>
             </select>
         </div>
@@ -426,52 +464,62 @@
         <!-- Section: Model Transformation Controllers -->
         <div class="section-title">3D Position Controls</div>
         
-        <div class="range-container">
-            <div class="range-header">
-                <span>Model Size</span>
-                <span class="range-val" id="val-scale">1.0x</span>
+        <div id="pos-sliders-wrapper">
+            <div class="range-container">
+                <div class="range-header">
+                    <span>Model Size</span>
+                    <span class="range-val" id="val-scale">1.0x</span>
+                </div>
+                <input type="range" id="model-scale" min="0.4" max="2.0" step="0.05" value="1.0" oninput="updateModelTransforms()">
             </div>
-            <input type="range" id="model-scale" min="0.4" max="2.0" step="0.05" value="1.0" oninput="updateModelTransforms()">
+
+            <div class="range-container">
+                <div class="range-header">
+                    <span>Horizontal Offset (X)</span>
+                    <span class="range-val" id="val-x">0px</span>
+                </div>
+                <input type="range" id="model-x" min="-400" max="400" step="5" value="0" oninput="updateModelTransforms()">
+            </div>
+
+            <div class="range-container">
+                <div class="range-header">
+                    <span>Vertical Offset (Y)</span>
+                    <span class="range-val" id="val-y">0px</span>
+                </div>
+                <input type="range" id="model-y" min="-300" max="300" step="5" value="0" oninput="updateModelTransforms()">
+            </div>
+
+            <div class="range-container">
+                <div class="range-header">
+                    <span>Model Rotation</span>
+                    <span class="range-val" id="val-rot">0°</span>
+                </div>
+                <input type="range" id="model-rot" min="-180" max="180" step="5" value="0" oninput="updateModelTransforms()">
+            </div>
         </div>
 
-        <div class="range-container">
-            <div class="range-header">
-                <span>Horizontal Offset (X)</span>
-                <span class="range-val" id="val-x">0px</span>
-            </div>
-            <input type="range" id="model-x" min="-400" max="400" step="5" value="0" oninput="updateModelTransforms()">
-        </div>
-
-        <div class="range-container">
-            <div class="range-header">
-                <span>Vertical Offset (Y)</span>
-                <span class="range-val" id="val-y">0px</span>
-            </div>
-            <input type="range" id="model-y" min="-300" max="300" step="5" value="0" oninput="updateModelTransforms()">
-        </div>
-
-        <div class="range-container">
-            <div class="range-header">
-                <span>Model Rotation</span>
-                <span class="range-val" id="val-rot">0°</span>
-            </div>
-            <input type="range" id="model-rot" min="-180" max="180" step="5" value="0" oninput="updateModelTransforms()">
-        </div>
-
-        <button class="btn" onclick="resetTransforms()">Reset Position</button>
+        <button class="btn" id="reset-pos-btn" onclick="resetTransforms()">Reset Position</button>
     </div>
 
     <script>
-        // Set up the Camera webcam stream
         const video = document.getElementById('webcam-feed');
+        const overlay = document.getElementById('model-overlay-container');
+        const cameraStatus = document.getElementById('camera-status');
+        const trackingStatus = document.getElementById('tracking-status');
+        let handsDetector = null;
+        let cameraHelper = null;
+
+        // Set up the Camera webcam stream
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
                 .then(function(stream) {
                     video.srcObject = stream;
-                    video.play();
+                    cameraStatus.innerHTML = `<div class="pulse"></div> Webcam Stream Active`;
+                    initMediaPipe();
                 })
                 .catch(function(error) {
                     console.error("Could not access camera feed: ", error);
+                    cameraStatus.innerHTML = `<div class="pulse secondary"></div> Connection Failed`;
                     alert("Please allow webcam access to view the overlays on your feed.");
                 });
         }
@@ -494,11 +542,10 @@
             const container = document.getElementById('sketchfab-wrapper');
             
             // Build the standard Sketchfab embed structure with autoplay, transparent background parameters
-            // transparent=1 hides default background, card=0 simplifies ui
             container.innerHTML = `
                 <iframe 
                     title="3D Model Viewer" 
-                    src="https://sketchfab.com/models/${modelId}/embed?autostart=1&camera=0&transparent=1&preload=1&ui_controls=1&ui_animations=1" 
+                    src="https://sketchfab.com/models/${modelId}/embed?autostart=1&camera=0&transparent=1&preload=1&ui_controls=0&ui_animations=1" 
                     allow="autoplay; fullscreen; xr-spatial-tracking" 
                     allowfullscreen 
                     mozallowfullscreen="true" 
@@ -509,19 +556,46 @@
 
         // Transform model overlay properties (translation, rotation, scale)
         function updateModelTransforms() {
-            const scale = document.getElementById('model-scale').value;
-            const x = document.getElementById('model-x').value;
-            const y = document.getElementById('model-y').value;
-            const rot = document.getElementById('model-rot').value;
+            const trackingEnabled = document.getElementById('web-hand-tracking').checked;
             
-            // Update UI telemetry badges
-            document.getElementById('val-scale').innerText = `${scale}x`;
-            document.getElementById('val-x').innerText = `${x}px`;
-            document.getElementById('val-y').innerText = `${y}px`;
-            document.getElementById('val-rot').innerText = `${rot}°`;
+            if (!trackingEnabled) {
+                // Read from manual sliders in manual mode
+                const scale = document.getElementById('model-scale').value;
+                const x = document.getElementById('model-x').value;
+                const y = document.getElementById('model-y').value;
+                const rot = document.getElementById('model-rot').value;
+                
+                // Update UI telemetry badges
+                document.getElementById('val-scale').innerText = `${scale}x`;
+                document.getElementById('val-x').innerText = `${x}px`;
+                document.getElementById('val-y').innerText = `${y}px`;
+                document.getElementById('val-rot').innerText = `${rot}°`;
+                
+                overlay.style.left = '50%';
+                overlay.style.top = '50%';
+                overlay.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale}) rotate(${rot}deg)`;
+            }
+        }
+
+        // Toggle Manual Controls vs AI Tracking Mode
+        function toggleTrackingMode() {
+            const trackingEnabled = document.getElementById('web-hand-tracking').checked;
+            const slidersWrapper = document.getElementById('pos-sliders-wrapper');
+            const resetBtn = document.getElementById('reset-pos-btn');
             
-            const overlay = document.getElementById('model-overlay-container');
-            overlay.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale}) rotate(${rot}deg)`;
+            if (trackingEnabled) {
+                slidersWrapper.classList.add('disabled');
+                resetBtn.style.display = 'none';
+                overlay.classList.add('tracking');
+                overlay.style.opacity = 0; // Hide until hand is tracked
+            } else {
+                slidersWrapper.classList.remove('disabled');
+                resetBtn.style.display = 'block';
+                overlay.classList.remove('tracking');
+                overlay.style.opacity = 1; // Make it static and editable
+                trackingStatus.style.display = 'none';
+                resetTransforms();
+            }
         }
 
         // Reset transforms back to default central positions
@@ -534,47 +608,107 @@
             updateModelTransforms();
         }
 
-        // Dragging functionality to reposition model container anywhere
-        const overlay = document.getElementById('model-overlay-container');
-        let isDragging = false;
-        let startX, startY;
-        let initialOffset = { x: 0, y: 0 };
+        // --- MediaPipe Hands Integration ---
+        function initMediaPipe() {
+            handsDetector = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
 
-        overlay.addEventListener('mousedown', function(e) {
-            if (e.target.tagName.toLowerCase() === 'iframe') return; // Don't drag if clicking inside iframe controls
-            isDragging = true;
-            startX = e.clientX;
-            startY = e.clientY;
-            initialOffset.x = parseInt(document.getElementById('model-x').value) || 0;
-            initialOffset.y = parseInt(document.getElementById('model-y').value) || 0;
-            overlay.style.cursor = 'grabbing';
-            e.preventDefault();
-        });
+            handsDetector.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
 
-        window.addEventListener('mousemove', function(e) {
-            if (!isDragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            
-            const newX = initialOffset.x + dx;
-            const newY = initialOffset.y + dy;
-            
-            document.getElementById('model-x').value = newX;
-            document.getElementById('model-y').value = newY;
-            
-            updateModelTransforms();
-        });
+            handsDetector.onResults(onHandResults);
 
-        window.addEventListener('mouseup', function() {
-            isDragging = false;
-            overlay.style.cursor = 'default';
-        });
+            cameraHelper = new Camera(video, {
+                onFrame: async () => {
+                    if (document.getElementById('web-hand-tracking').checked) {
+                        await handsDetector.send({image: video});
+                    }
+                },
+                width: 1280,
+                height: 720
+            });
+            cameraHelper.start();
+        }
 
-        // Initialize values on start
+        // Stabilize coordinate changes (Simple Low-Pass Filter)
+        let lastCoords = { x: 0.5, y: 0.5, scale: 1.0, angle: 0.0 };
+        const filterAlpha = 0.22; // Smoothing coefficient (lower = smoother but has lag)
+
+        function onHandResults(results) {
+            const trackingEnabled = document.getElementById('web-hand-tracking').checked;
+            if (!trackingEnabled) return;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                trackingStatus.style.display = 'inline-flex';
+                overlay.style.opacity = 1;
+
+                const landmarks = results.multiHandLandmarks[0];
+
+                // 1. Calculate Palm Center Centroid (Avg of Wrist(0), Index MCP(5), Pinky MCP(17))
+                const p0 = landmarks[0];
+                const p5 = landmarks[5];
+                const p17 = landmarks[17];
+                const p9 = landmarks[9]; // Middle finger MCP
+
+                const cx = (p0.x + p5.x + p17.x) / 3;
+                const cy = (p0.y + p5.y + p17.y) / 3;
+
+                // 2. Map coordinates relative to mirror/flip configurations
+                const mirror = document.getElementById('camera-mirror').checked;
+                const flip = document.getElementById('camera-flip').checked;
+
+                let mappedX = mirror ? (1.0 - cx) : cx;
+                let mappedY = flip ? (1.0 - cy) : cy;
+
+                // 3. Compute hand size/scale (using distance between Wrist(0) and Middle MCP(9))
+                const dx = p0.x - p9.x;
+                const dy = p0.y - p9.y;
+                const dz = p0.z - p9.z;
+                const rawDist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                // Map raw 3D distance to model scale (approx standard size: 0.12 = 1.0x scale)
+                const targetScale = (rawDist / 0.12) * 0.95;
+
+                // 4. Compute hand rotation/tilt (angle between Wrist(0) and Middle MCP(9))
+                const angleRad = Math.atan2(p9.x - p0.x, p0.y - p9.y);
+                let targetAngle = angleRad * (180 / Math.PI);
+                
+                if (mirror) {
+                    targetAngle = -targetAngle;
+                }
+
+                // 5. Apply Low-Pass Smoothing filter
+                lastCoords.x = lastCoords.x + filterAlpha * (mappedX - lastCoords.x);
+                lastCoords.y = lastCoords.y + filterAlpha * (mappedY - lastCoords.y);
+                lastCoords.scale = lastCoords.scale + filterAlpha * (targetScale - lastCoords.scale);
+                lastCoords.angle = lastCoords.angle + filterAlpha * (targetAngle - lastCoords.angle);
+
+                // Convert to viewport pixel positions
+                const posX = lastCoords.x * window.innerWidth;
+                const posY = lastCoords.y * window.innerHeight;
+                
+                // Update 3D overlay translation & scale
+                overlay.style.left = `${posX}px`;
+                overlay.style.top = `${posY}px`;
+                overlay.style.transform = `translate(-50%, -50%) scale(${lastCoords.scale}) rotate(${lastCoords.angle}deg)`;
+
+            } else {
+                // Smoothly fade out overlay if hand is lost
+                overlay.style.opacity = 0.05;
+                trackingStatus.style.display = 'none';
+            }
+        }
+
+        // Initialize values on load
         window.onload = function() {
             updateTransforms();
             loadModel();
-            updateModelTransforms();
+            toggleTrackingMode();
         };
     </script>
 </body>
