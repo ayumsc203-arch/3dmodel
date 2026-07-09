@@ -7,7 +7,8 @@ from src.assets.loader import ObjLoader
 from src.assets.procedural import (
     generate_butterfly_model,
     generate_phoenix_model,
-    generate_dragon_model
+    generate_dragon_model,
+    generate_sphere_model
 )
 
 
@@ -123,6 +124,26 @@ class TestAssets(unittest.TestCase):
         """Test generating and parsing the procedural dragon model."""
         file_path = self.test_dir / "test_dragon.obj"
         generate_dragon_model(file_path)
+        
+        self.assertTrue(file_path.exists())
+        self.greaterThan(os.path.getsize(file_path), 0)
+
+        v_count = 0
+        f_count = 0
+        with open(file_path, "r") as f:
+            for line in f:
+                if line.startswith("v "):
+                    v_count += 1
+                elif line.startswith("f "):
+                    f_count += 1
+                    
+        self.greaterThan(v_count, 0)
+        self.greaterThan(f_count, 0)
+
+    def test_procedural_sphere_generation(self):
+        """Test generating and parsing the procedural sphere model."""
+        file_path = self.test_dir / "test_sphere.obj"
+        generate_sphere_model(file_path)
         
         self.assertTrue(file_path.exists())
         self.greaterThan(os.path.getsize(file_path), 0)

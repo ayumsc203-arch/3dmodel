@@ -193,7 +193,8 @@ def main() -> None:
             width=cam_conf.get("width", 1280),
             height=cam_conf.get("height", 720),
             target_fps=cam_conf.get("fps", 60),
-            mirror=cam_conf.get("mirror", True)
+            mirror=cam_conf.get("mirror", True),
+            flip_vertical=cam_conf.get("flip_vertical", False)
         )
         
         if not cam.initialize_capture():
@@ -226,9 +227,10 @@ def main() -> None:
             "src/assets/models/wing.obj",
             "src/assets/models/butterfly.obj",
             "src/assets/models/phoenix.obj",
-            "src/assets/models/dragon.obj"
+            "src/assets/models/dragon.obj",
+            "src/assets/models/sphere.obj"
         ]
-        model_names = ["orchid", "wing", "butterfly", "phoenix", "dragon"]
+        model_names = ["orchid", "wing", "butterfly", "phoenix", "dragon", "energy_ball"]
         active_model_idx = 0
         
         # Track previous gesture to enable edge-triggered swipes
@@ -320,12 +322,12 @@ def main() -> None:
                     
                     # Edge-triggered swiping to cycle models (updates DPG selector dynamically)
                     if gesture == Gesture.SWIPE_LEFT and last_gestures[label] != Gesture.SWIPE_LEFT:
-                        active_model_idx = (active_model_idx - 1) % 5
+                        active_model_idx = (active_model_idx - 1) % 6
                         ui_state.active_model_idx = active_model_idx
                         ui_panel.set_active_model_combo(active_model_idx)
                         logger.info(f"Swiped Left! Switching to active model: {model_names[active_model_idx]}")
                     elif gesture == Gesture.SWIPE_RIGHT and last_gestures[label] != Gesture.SWIPE_RIGHT:
-                        active_model_idx = (active_model_idx + 1) % 5
+                        active_model_idx = (active_model_idx + 1) % 6
                         ui_state.active_model_idx = active_model_idx
                         ui_panel.set_active_model_combo(active_model_idx)
                         logger.info(f"Swiped Right! Switching to active model: {model_names[active_model_idx]}")
@@ -362,7 +364,12 @@ def main() -> None:
                         ui_state.right_palm_pos = (pos.x, pos.y, pos.z)
                         
                     # Scale factor of hand, smoothly animated by transition scale
-                    scale = hand.scale * 0.4 * vfx_manager.transition_scale
+                    if active_model_name == "energy_ball":
+                        # Pulse scale (breathing effect)
+                        pulse = 0.3 + 0.04 * np.sin((time.time() - start_time) * 6.0)
+                        scale = hand.scale * pulse * vfx_manager.transition_scale
+                    else:
+                        scale = hand.scale * 0.4 * vfx_manager.transition_scale
                     
                     # Sync wing fluttering settings from UI panel (Module 9)
                     animate_wings = ui_state.animate_wings and (active_model_name in ["butterfly", "phoenix", "dragon"])
@@ -380,9 +387,12 @@ def main() -> None:
                     elif active_model_name == "phoenix":
                         obj_color = glm.vec3(1.0, 0.6, 0.1)      # Golden orange phoenix
                         base_emissive = glm.vec3(0.8, 0.15, 0.0)
-                    else:  # dragon
+                    elif active_model_name == "dragon":
                         obj_color = glm.vec3(0.3, 0.05, 0.4)     # Deep violet dragon
                         base_emissive = glm.vec3(0.6, 0.0, 0.8)
+                    else:  # energy_ball
+                        obj_color = glm.vec3(0.0, 0.75, 1.0)     # Cyan plasma orb
+                        base_emissive = glm.vec3(0.2, 0.8, 1.5)
                     
                     # Map gestures to colors and glow emissive intensities
                     if gesture == Gesture.PINCH:

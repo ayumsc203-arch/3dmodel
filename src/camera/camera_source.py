@@ -20,13 +20,15 @@ class CameraSource:
         width: int = 1280,
         height: int = 720,
         target_fps: int = 60,
-        mirror: bool = True
+        mirror: bool = True,
+        flip_vertical: bool = False
     ):
         self.device_index = device_index
         self.target_width = width
         self.target_height = height
         self.target_fps = target_fps
         self.mirror = mirror
+        self.flip_vertical = flip_vertical
 
         # OpenCV Capture Object
         self.cap: Optional[cv2.VideoCapture] = None
@@ -140,9 +142,13 @@ class CameraSource:
                 time.sleep(0.01)
                 continue
 
-            # Process frame (mirroring)
-            if self.mirror:
+            # Process frame (mirroring and flipping)
+            if self.mirror and self.flip_vertical:
+                frame = cv2.flip(frame, -1)
+            elif self.mirror:
                 frame = cv2.flip(frame, 1)
+            elif self.flip_vertical:
+                frame = cv2.flip(frame, 0)
 
             # Store frame thread-safely
             with self.lock:

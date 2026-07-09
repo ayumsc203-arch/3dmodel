@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Hand VFX - Sketchfab Overlay Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00f0ff;
+            --secondary: #ff007f;
+            --bg-dark: #0a0a0f;
+            --panel-bg: rgba(15, 15, 25, 0.65);
+            --border-glow: rgba(0, 240, 255, 0.25);
+            --font-main: 'Outfit', sans-serif;
+            --font-header: 'Space Grotesk', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-dark);
+            color: #ffffff;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Fullscreen Camera Stream Background */
+        #webcam-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        #webcam-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Active Model Overlay Viewport */
+        #model-overlay-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 750px;
+            height: 600px;
+            z-index: 5;
+            pointer-events: auto;
+            transition: transform 0.2s ease-out;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .sketchfab-embed-wrapper {
+            width: 100%;
+            height: 100%;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            background: transparent;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .sketchfab-embed-wrapper iframe {
+            width: 100%;
+            height: 100%;
+            border: 0;
+            background: transparent;
+        }
+
+        /* Sleek Glassmorphism Control Panel */
+        #ui-panel {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            width: 380px;
+            max-height: calc(100vh - 60px);
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            z-index: 10;
+            padding: 30px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4),
+                        0 0 20px rgba(0, 240, 255, 0.1);
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+
+        #ui-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+        #ui-panel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        .header {
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-family: var(--font-header);
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--primary), #ab00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: #8a8ab0;
+            margin-top: 4px;
+        }
+
+        .section-title {
+            font-family: var(--font-header);
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: 2px;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.15);
+            padding-bottom: 6px;
+        }
+
+        /* Form Components styling */
+        .control-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: #b5b5c9;
+            margin-bottom: 8px;
+        }
+
+        /* Select styling */
+        select {
+            width: 100%;
+            background: rgba(20, 20, 35, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 12px;
+            color: #ffffff;
+            font-family: var(--font-main);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+            cursor: pointer;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+        }
+
+        /* Toggle / Checkbox styling */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 12px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .toggle-container span {
+            font-size: 14px;
+            color: #ffffff;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.15);
+            transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Range Slider styling */
+        .range-container {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 12px;
+        }
+
+        .range-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .range-val {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--primary);
+            transition: background 0.3s;
+        }
+
+        /* Drag handle indicator overlay */
+        #model-overlay-container::before {
+            content: 'Drag to Move';
+            position: absolute;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: var(--primary);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        #model-overlay-container:hover::before {
+            opacity: 0.8;
+        }
+
+        /* Reset Button */
+        .btn {
+            display: block;
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #ffffff;
+            border: none;
+            border-radius: 14px;
+            padding: 14px;
+            font-family: var(--font-header);
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 16px;
+            box-shadow: 0 4px 15px rgba(0, 240, 255, 0.25);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 240, 255, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        /* Status Badge */
+        #status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--primary);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            text-transform: uppercase;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--primary);
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes pulse-glow {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 14px var(--primary); }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Camera Feed -->
+    <div id="webcam-container">
+        <video id="webcam-feed" autoplay playsinline muted></video>
+    </div>
+
+    <!-- Active 3D Model Render Layer -->
+    <div id="model-overlay-container">
+        <div class="sketchfab-embed-wrapper" id="sketchfab-wrapper">
+            <!-- Iframe loads dynamically here -->
+        </div>
+    </div>
+
+    <!-- UI Side Control Panel -->
+    <div id="ui-panel">
+        <div class="header">
+            <h1>Camera Overlay Dashboard</h1>
+            <p>Embed premium Sketchfab models over webcam feed</p>
+        </div>
+
+        <div id="status-bar">
+            <div class="badge">
+                <div class="pulse"></div>
+                Webcam Stream Active
+            </div>
+        </div>
+
+        <!-- Section: VFX Models -->
+        <div class="section-title">Visual Overlays</div>
+        <div class="control-group">
+            <label for="model-selector">Active 3D Model</label>
+            <select id="model-selector" onchange="loadModel()">
+                <option value="59c1bf78e8b543299d2d68581d2e6c0d">Enchanted Dark Dragon (by Kyan0s)</option>
+                <option value="844ba0cf144a413ea92c779f18912042">Phoenix Bird (by NORBERTO-3D)</option>
+            </select>
+        </div>
+
+        <!-- Section: Camera Feed Settings -->
+        <div class="section-title">Camera Feed Setup</div>
+        
+        <div class="toggle-container">
+            <span>Mirror horizontally (Left-Right)</span>
+            <label class="switch">
+                <input type="checkbox" id="camera-mirror" onchange="updateTransforms()" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="toggle-container">
+            <span>Flip vertically (Upside-Down)</span>
+            <label class="switch">
+                <input type="checkbox" id="camera-flip" onchange="updateTransforms()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <!-- Section: Model Transformation Controllers -->
+        <div class="section-title">3D Position Controls</div>
+        
+        <div class="range-container">
+            <div class="range-header">
+                <span>Model Size</span>
+                <span class="range-val" id="val-scale">1.0x</span>
+            </div>
+            <input type="range" id="model-scale" min="0.4" max="2.0" step="0.05" value="1.0" oninput="updateModelTransforms()">
+        </div>
+
+        <div class="range-container">
+            <div class="range-header">
+                <span>Horizontal Offset (X)</span>
+                <span class="range-val" id="val-x">0px</span>
+            </div>
+            <input type="range" id="model-x" min="-400" max="400" step="5" value="0" oninput="updateModelTransforms()">
+        </div>
+
+        <div class="range-container">
+            <div class="range-header">
+                <span>Vertical Offset (Y)</span>
+                <span class="range-val" id="val-y">0px</span>
+            </div>
+            <input type="range" id="model-y" min="-300" max="300" step="5" value="0" oninput="updateModelTransforms()">
+        </div>
+
+        <div class="range-container">
+            <div class="range-header">
+                <span>Model Rotation</span>
+                <span class="range-val" id="val-rot">0°</span>
+            </div>
+            <input type="range" id="model-rot" min="-180" max="180" step="5" value="0" oninput="updateModelTransforms()">
+        </div>
+
+        <button class="btn" onclick="resetTransforms()">Reset Position</button>
+    </div>
+
+    <script>
+        // Set up the Camera webcam stream
+        const video = document.getElementById('webcam-feed');
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
+                .then(function(stream) {
+                    video.srcObject = stream;
+                    video.play();
+                })
+                .catch(function(error) {
+                    console.error("Could not access camera feed: ", error);
+                    alert("Please allow webcam access to view the overlays on your feed.");
+                });
+        }
+
+        // Apply Horizontal Mirroring & Vertical Flipping onto camera stream
+        function updateTransforms() {
+            const mirror = document.getElementById('camera-mirror').checked;
+            const flip = document.getElementById('camera-flip').checked;
+            
+            let scaleX = mirror ? -1 : 1;
+            let scaleY = flip ? -1 : 1;
+            
+            video.style.transform = `scale(${scaleX}, ${scaleY})`;
+        }
+        
+        // Dynamic Model loading
+        function loadModel() {
+            const selector = document.getElementById('model-selector');
+            const modelId = selector.value;
+            const container = document.getElementById('sketchfab-wrapper');
+            
+            // Build the standard Sketchfab embed structure with autoplay, transparent background parameters
+            // transparent=1 hides default background, card=0 simplifies ui
+            container.innerHTML = `
+                <iframe 
+                    title="3D Model Viewer" 
+                    src="https://sketchfab.com/models/${modelId}/embed?autostart=1&camera=0&transparent=1&preload=1&ui_controls=1&ui_animations=1" 
+                    allow="autoplay; fullscreen; xr-spatial-tracking" 
+                    allowfullscreen 
+                    mozallowfullscreen="true" 
+                    webkitallowfullscreen="true">
+                </iframe>
+            `;
+        }
+
+        // Transform model overlay properties (translation, rotation, scale)
+        function updateModelTransforms() {
+            const scale = document.getElementById('model-scale').value;
+            const x = document.getElementById('model-x').value;
+            const y = document.getElementById('model-y').value;
+            const rot = document.getElementById('model-rot').value;
+            
+            // Update UI telemetry badges
+            document.getElementById('val-scale').innerText = `${scale}x`;
+            document.getElementById('val-x').innerText = `${x}px`;
+            document.getElementById('val-y').innerText = `${y}px`;
+            document.getElementById('val-rot').innerText = `${rot}°`;
+            
+            const overlay = document.getElementById('model-overlay-container');
+            overlay.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${scale}) rotate(${rot}deg)`;
+        }
+
+        // Reset transforms back to default central positions
+        function resetTransforms() {
+            document.getElementById('model-scale').value = "1.0";
+            document.getElementById('model-x').value = "0";
+            document.getElementById('model-y').value = "0";
+            document.getElementById('model-rot').value = "0";
+            
+            updateModelTransforms();
+        }
+
+        // Dragging functionality to reposition model container anywhere
+        const overlay = document.getElementById('model-overlay-container');
+        let isDragging = false;
+        let startX, startY;
+        let initialOffset = { x: 0, y: 0 };
+
+        overlay.addEventListener('mousedown', function(e) {
+            if (e.target.tagName.toLowerCase() === 'iframe') return; // Don't drag if clicking inside iframe controls
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialOffset.x = parseInt(document.getElementById('model-x').value) || 0;
+            initialOffset.y = parseInt(document.getElementById('model-y').value) || 0;
+            overlay.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            const newX = initialOffset.x + dx;
+            const newY = initialOffset.y + dy;
+            
+            document.getElementById('model-x').value = newX;
+            document.getElementById('model-y').value = newY;
+            
+            updateModelTransforms();
+        });
+
+        window.addEventListener('mouseup', function() {
+            isDragging = false;
+            overlay.style.cursor = 'default';
+        });
+
+        // Initialize values on start
+        window.onload = function() {
+            updateTransforms();
+            loadModel();
+            updateModelTransforms();
+        };
+    </script>
+</body>
+</html>

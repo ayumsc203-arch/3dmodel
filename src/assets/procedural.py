@@ -647,8 +647,42 @@ def generate_dragon_model(file_path: Path) -> None:
     write_obj(file_path, np.array(vertices), np.array(normals), faces)
 
 
+def generate_sphere_model(file_path: Path) -> None:
+    """Generates a detailed 3D UV Sphere model."""
+    vertices = []
+    normals = []
+    faces = []
+    
+    rings = 16
+    segments = 16
+    radius = 0.12
+    
+    for r in range(rings):
+        phi = r * np.pi / (rings - 1)
+        for s in range(segments):
+            theta = s * 2.0 * np.pi / segments
+            
+            x = radius * np.sin(phi) * np.cos(theta)
+            y = radius * np.cos(phi)
+            z = radius * np.sin(phi) * np.sin(theta)
+            
+            vertices.append([x, y, z])
+            normals.append([x/radius, y/radius, z/radius])
+            
+    for r in range(rings - 1):
+        for s in range(segments):
+            i0 = r * segments + s
+            i1 = r * segments + (s + 1) % segments
+            i2 = (r + 1) * segments + s
+            i3 = (r + 1) * segments + (s + 1) % segments
+            faces.append([i0, i1, i3])
+            faces.append([i0, i3, i2])
+            
+    write_obj(file_path, np.array(vertices), np.array(normals), faces)
+
+
 def generate_all_procedural_models() -> None:
-    """Generates all orchid, wing, butterfly, phoenix, and dragon files in the assets directory."""
+    """Generates all orchid, wing, butterfly, phoenix, dragon, and sphere files in the assets directory."""
     base_dir = Path(__file__).parent.parent.resolve() / "assets" / "models"
     
     models = {
@@ -656,7 +690,8 @@ def generate_all_procedural_models() -> None:
         "wing.obj": generate_wing_model,
         "butterfly.obj": generate_butterfly_model,
         "phoenix.obj": generate_phoenix_model,
-        "dragon.obj": generate_dragon_model
+        "dragon.obj": generate_dragon_model,
+        "sphere.obj": generate_sphere_model
     }
 
     for name, func in models.items():

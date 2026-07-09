@@ -6,6 +6,7 @@ camera:
   height: 720
   fps: 60
   mirror: true
+  flip_vertical: true
 
 tracking:
   max_num_hands: 2
@@ -53,3 +54,6 @@ vfx:
     - name: "dragon"
       model_path: "assets/models/dragon.obj"
       color: [0.3, 0.05, 0.4]  # Deep violet
+    - name: "energy_ball"
+      model_path: "assets/models/sphere.obj"
+      color: [0.0, 0.9, 1.0]  # Cyan plasma

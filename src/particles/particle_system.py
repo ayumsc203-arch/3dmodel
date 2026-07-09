@@ -201,6 +201,18 @@ class ParticleSystem:
                 self.colors[idx] = [base_color[0], base_color[1], base_color[2], 0.8]
                 self.sizes[idx] = random.uniform(0.03, 0.09)
 
+            elif emitter_type == "plasma":
+                # Plasma: drift upward and slightly outward
+                self.velocities[idx] = [
+                    random.uniform(-0.12, 0.12),
+                    random.uniform(0.35, 0.7),
+                    random.uniform(-0.12, 0.12)
+                ]
+                self.colors[idx] = [base_color[0], base_color[1], base_color[2], 0.95]
+                self.sizes[idx] = random.uniform(0.015, 0.03)
+                self.max_lifetimes[idx] = random.uniform(0.3, 0.6)
+                self.lifetimes[idx] = self.max_lifetimes[idx]
+
     def update(self, dt: float, gravity: np.ndarray = np.array([0.0, -1.0, 0.0])) -> int:
         """
         Updates the physics equations of all active particles using NumPy.
@@ -248,6 +260,10 @@ class ParticleSystem:
             elif p_type == "smoke":
                 self.sizes[idx] += dt * 0.1
                 
+            # Plasma particles scale down
+            elif p_type == "plasma":
+                self.sizes[idx] *= 0.96
+
             # Magic spirals around origin
             elif p_type == "magic":
                 # Add swirling orbital force

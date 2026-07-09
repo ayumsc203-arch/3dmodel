@@ -35,6 +35,7 @@ class ControlPanel:
     def __init__(self, state: UIState):
         self.state = state
         self.context_created = False
+        self.last_sync_model_idx = 0
 
     def setup(self, width: int = 380, height: int = 680) -> None:
         """Initializes DPG context, layouts, styles, and viewport settings."""
@@ -105,7 +106,7 @@ class ControlPanel:
 
             # 3. 3D Asset Settings Section
             with dpg.collapsing_header(label="3D ASSETS SELECTION", default_open=True):
-                models_items = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon"]
+                models_items = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon", "Energy Ball"]
                 dpg.add_combo(
                     items=models_items,
                     label="Active Asset",
@@ -158,12 +159,11 @@ class ControlPanel:
         if not self.context_created or not dpg.is_dearpygui_running():
             return
 
-        # Synchronize active model combo box with external updates (like swipe gestures)
-        model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon"]
-        current_combo_val = dpg.get_value("active_model_combo")
-        expected_combo_val = model_list[self.state.active_model_idx]
-        if current_combo_val != expected_combo_val:
-            dpg.set_value("active_model_combo", expected_combo_val)
+        # Synchronize active model combo box with external updates (like hand swipe gestures)
+        if self.state.active_model_idx != self.last_sync_model_idx:
+            model_list = ["Orchid Plant", "Fantasy Wing", "Butterfly Swarm", "Phoenix Bird", "Dark Dragon", "Energy Ball"]
+            dpg.set_value("active_model_combo", model_list[self.state.active_model_idx])
+            self.last_sync_model_idx = self.state.active_model_idx
 
         # 1. Update State variables from DPG inputs
         self.state.bloom_intensity = dpg.get_value("bloom_intensity_slider")
@@ -176,9 +176,13 @@ class ControlPanel:
             "Fantasy Wing": 1,
             "Butterfly Swarm": 2,
             "Phoenix Bird": 3,
-            "Dark Dragon": 4
+            "Dark Dragon": 4,
+            "Energy Ball": 5
         }
-        self.state.active_model_idx = model_map.get(model_str, 0)
+        selected_idx = model_map.get(model_str, 0)
+        if selected_idx != self.state.active_model_idx:
+            self.state.active_model_idx = selected_idx
+            self.last_sync_model_idx = selected_idx
         
         self.state.animate_wings = dpg.get_value("animate_wings_checkbox")
         self.state.min_detection_confidence = dpg.get_value("min_det_conf_slider")

@@ -153,6 +153,17 @@ class VfxManager:
                 world_pos = palm_pos + rot_mat @ (local_pos * hand_scale * 2.0)
                 self.particles.spawn(world_pos, emitter_type="energy", count=1, base_color=(0.8, 0.1, 0.8))
 
+        elif active_model_name == "energy_ball":
+            # Energy Ball: Cyan/blue plasma particles drifting upward and outward from palm centroid
+            for _ in range(4):
+                offset = np.array([
+                    random.uniform(-0.04, 0.04),
+                    random.uniform(-0.04, 0.04),
+                    random.uniform(-0.04, 0.04)
+                ], dtype=np.float32)
+                world_pos = palm_pos + rot_mat @ (offset * hand_scale)
+                self.particles.spawn(world_pos, emitter_type="plasma", count=1, base_color=(0.0, 0.8, 1.0))
+
     def render_swarm(
         self, 
         renderer, 
